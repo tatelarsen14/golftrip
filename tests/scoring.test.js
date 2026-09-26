@@ -175,11 +175,16 @@ test('head-to-head breaks a points tie', () => {
     // Sun: Team 3 sweeps Team 1; Team 2 sweeps Team 4.
     sun: round({ tate: [5, 5], garrett: [5, 5], josh: [3, 3], brody: [3, 3], sam: [3, 3], jonah: [3, 3], jp: [5, 5], skyler: [5, 5] }),
   };
-  const ranked = rankTeams(cfg, scores, ['sat', 'sun']);
+  const { ranked, ties } = rankTeams(cfg, scores, ['sat', 'sun']);
   assert.deepEqual(ranked.map((t) => [t.idx, t.points]), [[2, 4.5], [0, 3], [1, 3], [3, 1.5]]);
   assert.equal(ranked[1].tiebreak, 'Head-to-head points');
   assert.equal(ranked[1].rank, 2);
   assert.equal(ranked[2].rank, 3);
+  // One tie (Teams 1 and 2 on 3 pts), settled at the first step.
+  assert.equal(ties.length, 1);
+  assert.deepEqual(ties[0].teams.sort(), [0, 1]);
+  assert.deepEqual(ties[0].steps.map((s) => [s.key, s.values[0], s.values[1]]), [['h2h', 3, 0]]);
+  assert.deepEqual(ties[0].steps[0].outcome, [[0], [1]]);
 });
 
 test('holes-up margin breaks a tie when head-to-head and wins are level', () => {
@@ -193,13 +198,41 @@ test('holes-up margin breaks a tie when head-to-head and wins are level', () => 
     }),
   };
   Object.assign(scores.sat.tate, holes([4, 4, 4, 4, 4, 4, 4, 4, 3], 1));
-  const ranked = rankTeams(cfg, scores, ['sat']);
+  const { ranked, ties } = rankTeams(cfg, scores, ['sat']);
+  assert.deepEqual(ties[0].steps.map((s) => s.key), ['h2h', 'wins', 'margin']);
   assert.deepEqual(ranked.slice(0, 2).map((t) => [t.idx, t.points, t.wins]), [[2, 2, 2], [0, 2, 2]]);
   assert.equal(ranked[0].tiebreak, 'Holes-up margin');
 });
 
-test('dead even after every tiebreaker is flagged for a coin flip', () => {
+test('dead even after every tiebreaker goes to a putt-off', () => {
   const scores = { sat: teamScores([4, 4, 4, 4]) };
-  const ranked = rankTeams(cfg, scores, ['sat']);
+  let { ranked, ties } = rankTeams(cfg, scores, ['sat']);
   assert.ok(ranked.every((t) => t.unresolved && t.rank === 1));
+  assert.deepEqual(ties[0].pending[0].teams.sort(), [0, 1, 2, 3]);
+  assert.equal(ties[0].steps.some((s) => s.key === 'puttoff'), false);
+
+  // Team 3 wins the putt-off; the other three are still tied.
+  const c = { ...cfg, puttoffs: { final: { '0-1-2-3': [2] } } };
+  ({ ranked, ties } = rankTeams(c, scores, ['sat']));
+  assert.equal(ranked[0].idx, 2);
+  assert.equal(ranked[0].unresolved, false);
+  assert.ok(ranked.slice(1).every((t) => t.unresolved && t.rank === 2));
+  assert.deepEqual(ties[0].pending[0].done, [2]);
+
+  // Full putt-off order recorded: everyone is placed.
+  c.puttoffs.final['0-1-2-3'] = [2, 0, 3, 1];
+  ({ ranked } = rankTeams(c, scores, ['sat']));
+  assert.deepEqual(ranked.map((t) => [t.idx, t.rank, t.unresolved]), [[2, 1, false], [0, 2, false], [3, 3, false], [1, 4, false]]);
+});
+
+test('a 2nd/3rd tie that needs a putt-off keeps Tuesday TBD; a 1st/2nd one does not', () => {
+  // Every Sat-Mon match halved: four-way tie on everything.
+  const even = { sat: teamScores([4, 4, 4, 4]), sun: teamScores([4, 4, 4, 4]), mon: teamScores([4, 4, 4, 4]) };
+  let tue = resolveConfig(cfg, even).rounds.find((r) => r.id === 'tue');
+  assert.equal(tue.pending, true);
+  assert.equal(tue.needsPuttoff, true);
+  const c = { ...cfg, puttoffs: { seed: { '0-1-2-3': [3, 2] } } };
+  tue = resolveConfig(c, even).rounds.find((r) => r.id === 'tue');
+  assert.equal(tue.pending, undefined);
+  assert.deepEqual(tue.groups.map((g) => g.teams), [[3, 2], [0, 1]]);
 });

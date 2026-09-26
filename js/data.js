@@ -24,6 +24,7 @@ export const TEAM_COLORS = ['#2f7d4f', '#1f5f99', '#b5541c', '#7a3fa0'];
 // alternate within the group. Friday's round isn't part of the tournament,
 // and Tuesday is seeded from the standings after Monday.
 export const DEFAULT_CONFIG = {
+  puttoffs: {},
   teams: [
     { name: 'Team 1', players: ['tate', 'garrett'] },
     { name: 'Team 2', players: ['sam', 'jonah'] },

@@ -181,13 +181,22 @@ export const TIEBREAKERS = [
   { key: 'wins', label: 'Most matches won' },
   { key: 'margin', label: 'Holes-up margin' },
   { key: 'strokes', label: 'Fewest total strokes' },
+  { key: 'puttoff', label: 'Putt-off' },
 ];
 
+// Putt-off results are stored per stage ('seed' after the earlier rounds,
+// 'final' after the last) and per group of tied teams, as team indexes in
+// finishing order.
+export const puttoffKey = (teamIdxs) => [...teamIdxs].sort((a, b) => a - b).join('-');
+
 // Ranks teams on final match results in the given rounds.
-// Returns team stats in order, each with `rank`, `tiebreak` (label of the
-// tiebreaker that placed it, or null) and `unresolved` (still tied after
-// every tiebreaker: flip a coin).
-export function rankTeams(config, scores, roundIds) {
+// Returns { ranked, ties }:
+// - ranked: team stats in order, each with `rank`, `tiebreak` (label of the
+//   tiebreaker that placed it, or null) and `unresolved` (still tied until a
+//   putt-off is recorded).
+// - ties: one entry per group of teams level on points, with every
+//   tiebreaker step it took to separate them.
+export function rankTeams(config, scores, roundIds, stage = 'final') {
   const stats = config.teams.map((t, idx) => ({
     idx, name: t.name, players: t.players, points: 0, wins: 0, margin: 0, strokes: 0, h2h: {},
   }));
@@ -212,45 +221,72 @@ export function rankTeams(config, scores, roundIds) {
     }
   }
 
-  const value = (t, key, tied) => {
-    if (key === 'points') return t.points;
-    if (key === 'h2h') return tied.reduce((a, o) => a + (o === t ? 0 : t.h2h[o.idx] || 0), 0);
-    if (key === 'strokes') return -t.strokes;
-    return t[key];
-  };
+  const puttoffs = config.puttoffs?.[stage] || {};
   const keys = ['points', ...TIEBREAKERS.map((tb) => tb.key)];
+  // Display value and sort value (higher sorts first) for one criterion.
+  const measure = (t, key, tied, putKey) => {
+    if (key === 'points') return [t.points, t.points];
+    if (key === 'h2h') {
+      const v = tied.reduce((a, o) => a + (o === t ? 0 : t.h2h[o.idx] || 0), 0);
+      return [v, v];
+    }
+    if (key === 'strokes') return [t.strokes, -t.strokes];
+    if (key === 'puttoff') {
+      const pos = (puttoffs[putKey] || []).indexOf(t.idx);
+      return pos < 0 ? [null, -99] : [pos + 1, -pos];
+    }
+    return [t[key], t[key]];
+  };
 
-  // Split a tied group by the next criterion; head-to-head only counts
-  // matches among the teams still tied.
-  const order = (group, k) => {
+  const ties = [];
+  // Split a group by criterion k, recording each tiebreaker step. Head-to-head
+  // only counts matches among the teams still tied at that step.
+  const order = (group, k, tie, putKey) => {
     if (group.length === 1) return group;
     if (k === keys.length) {
       group.forEach((t) => { t.unresolved = true; });
+      (tie.pending ||= []).push({ key: putKey, teams: group.map((t) => t.idx), done: puttoffs[putKey] || [] });
       return group;
     }
+    const key = keys[k];
+    const pk = key === 'puttoff' ? puttoffKey(group.map((t) => t.idx)) : putKey;
     const buckets = new Map();
+    const values = {};
     for (const t of group) {
-      const v = value(t, keys[k], group);
+      const [shown, v] = measure(t, key, group, pk);
+      values[t.idx] = shown;
       if (!buckets.has(v)) buckets.set(v, []);
       buckets.get(v).push(t);
     }
-    if (buckets.size > 1 && k > 0) group.forEach((t) => { t.tiebreak = TIEBREAKERS[k - 1].label; });
-    return [...buckets.entries()].sort((a, b) => b[0] - a[0]).flatMap(([, g]) => order(g, k + 1));
+    const sorted = [...buckets.entries()].sort((a, b) => b[0] - a[0]).map(([, g]) => g);
+    if (k === 0) {
+      return sorted.flatMap((g) => {
+        if (g.length === 1) return g;
+        const newTie = { points: g[0].points, teams: g.map((t) => t.idx), steps: [] };
+        ties.push(newTie);
+        return order(g, 1, newTie, null);
+      });
+    }
+    const played = key !== 'puttoff' || (puttoffs[pk] || []).length > 0;
+    if (played) tie.steps.push({ key, label: TIEBREAKERS[k - 1].label, n: k, values, outcome: sorted.map((g) => g.map((t) => t.idx)) });
+    if (sorted.length > 1) group.forEach((t) => { t.tiebreak = TIEBREAKERS[k - 1].label; });
+    return sorted.flatMap((g) => order(g, k + 1, tie, pk));
   };
 
   stats.forEach((t) => { t.tiebreak = null; t.unresolved = false; });
-  const ranked = order(stats, 0);
+  const ranked = order(stats, 0, null, null);
   ranked.forEach((t, i) => {
     const prev = ranked[i - 1];
     t.rank = prev && t.unresolved && prev.unresolved && prev.points === t.points ? prev.rank : i + 1;
   });
-  return ranked;
+  return { ranked, ties };
 }
 
 // Fills in seeded rounds: 1st v 2nd and 3rd v 4th on the standings from the
 // earlier rounds, once every one of those matches is final. Until then the
-// round is `pending` (matchups TBD) and `projected` holds the seeding as it
-// stands right now.
+// round is `pending` (matchups TBD) and `seeding` holds the matchups as they
+// stand right now. A tie between 2nd and 3rd that only a putt-off can break
+// also keeps it pending (`needsPuttoff`).
 export function resolveConfig(config, scores) {
   const resolved = structuredClone(config);
   const enabled = resolved.rounds.filter((r) => r.enabled);
@@ -261,13 +297,17 @@ export function resolveConfig(config, scores) {
     const priorMatches = buildMatches({ ...resolved, rounds: prior });
     const ready = prior.length > 0
       && priorMatches.every((m) => computeMatch(m, scores[m.roundId]).done);
-    const ranked = rankTeams(resolved, scores, priorIds).map((t) => t.idx);
-    const seeding = [[ranked[0], ranked[1]], [ranked[2], ranked[3]]];
+    const { ranked } = rankTeams(resolved, scores, priorIds, 'seed');
+    const seeding = [[ranked[0].idx, ranked[1].idx], [ranked[2].idx, ranked[3].idx]];
     round.seeding = seeding;
-    if (ready) {
+    round.priorIds = priorIds;
+    round.priorFinal = ready;
+    const splitUndecided = ranked[1].unresolved && ranked[2].unresolved && ranked[1].rank === ranked[2].rank;
+    if (ready && !splitUndecided) {
       round.groups = seeding.map((teams, gi) => ({ teams, cross: !!round.groups[gi]?.cross }));
     } else {
       round.pending = true;
+      round.needsPuttoff = ready && splitUndecided;
     }
   });
   return resolved;

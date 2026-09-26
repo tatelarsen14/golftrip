@@ -16,6 +16,7 @@ const LOCAL_KEY = `golftrip:${TRIP_ID}`;
 function withDefaults(saved) {
   const config = structuredClone(DEFAULT_CONFIG);
   if (saved?.teams) config.teams = saved.teams;
+  config.puttoffs = saved?.puttoffs || {};
   if (saved?.rounds) {
     config.rounds = saved.rounds
       .filter((r) => r.id !== 'fri') // Friday was dropped after launch
@@ -24,8 +25,8 @@ function withDefaults(saved) {
   return config;
 }
 
-// Only teams and pairings are saved; pars are fixed.
-const setupFields = ({ teams, rounds }) => JSON.parse(JSON.stringify({ teams, rounds }));
+// Only teams, pairings and putt-off results are saved; pars are fixed.
+const setupFields = ({ teams, rounds, puttoffs = {} }) => JSON.parse(JSON.stringify({ teams, rounds, puttoffs }));
 
 export async function createStore(onChange) {
   if (FIREBASE_CONFIG) {

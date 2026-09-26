@@ -2,7 +2,7 @@ import { createStore } from './store.js';
 import { PLAYERS, TEAM_COLORS, TRIP, ITINERARY, FLIGHTS, ESTIMATE, MATCHUPS } from './data.js';
 import {
   buildMatches, computeMatch, computeStandings, birdieCounts, parFor, scoreMark, rankTeams, resolveConfig,
-  TIEBREAKERS, FRONT_NINE, BACK_NINE,
+  TIEBREAKERS, FRONT_NINE, BACK_NINE, puttoffKey,
 } from './scoring.js';
 
 const UI_KEY = 'golftrip:ui';
@@ -88,6 +88,13 @@ function groupTitle(round, gi) {
 // Shown in place of a seeded round's matches until Sat-Mon are all final.
 function pendingNote(config, round) {
   const ifNow = round.seeding.map(([a, b]) => `${esc(config.teams[a].name)} v ${esc(config.teams[b].name)}`).join(' · ');
+  if (round.needsPuttoff) {
+    return `<div class="card tbd">
+      <div class="tbd-title">Putt-off needed</div>
+      <p>Teams are dead even for 2nd and 3rd after every tiebreaker. Play the putt-off and record the winner
+        on the Leaderboard; the matchups are set right after.</p>
+    </div>`;
+  }
   return `<div class="card tbd">
     <div class="tbd-title">Matchups TBD</div>
     <p>Set when every earlier match is final: <b>1st v 2nd</b> and <b>3rd v 4th</b> in the standings.</p>
@@ -130,6 +137,86 @@ function matchCard(match, res, { compact = false } = {}) {
   </article>`;
 }
 
+// ---------- Tiebreakers ----------
+
+const ORDINALS = ['1st', '2nd', '3rd', '4th'];
+
+function fmtTieValue(key, v) {
+  if (key === 'h2h') return `${fmtPts(v)} pts`;
+  if (key === 'wins') return `${v} won`;
+  if (key === 'margin') return v > 0 ? `+${v}` : String(v);
+  if (key === 'strokes') return `${v} strokes`;
+  if (key === 'puttoff') return v ? ORDINALS[v - 1] : '–';
+  return String(v);
+}
+
+// Step-by-step breakdown of each tie, down the tiebreaker list until it's
+// settled, with putt-off buttons if it comes to that.
+// A putt-off only matters if the still-tied teams straddle a spot that
+// counts: 2nd/3rd for the seeding, 1st for the title.
+function puttoffMatters(ranked, teams, stage) {
+  const top = Math.min(...ranked.filter((t) => teams.includes(t.idx)).map((t) => ranked.indexOf(t) + 1));
+  const bottom = top + teams.length - 1;
+  return stage === 'seed' ? top <= 2 && bottom >= 3 : top === 1;
+}
+
+function tiePanel(config, title, sub, ties, stage, ranked) {
+  const name = (idx) => esc(config.teams[idx].name);
+  const names = (idxs) => idxs.map(name).join(' & ');
+  const puttoffUndo = (key) => `<button class="link" data-action="puttoff-reset" data-stage="${stage}" data-key="${key}">Undo putt-off</button>`;
+
+  const stepHtml = (step, tie) => {
+    const order = step.outcome.flat();
+    const result = step.outcome.length === 1 ? 'Still tied → next tiebreaker'
+      : step.outcome.every((g) => g.length === 1)
+        ? (order.length === 2 ? `✓ ${name(order[0])} wins` : `✓ Order: ${order.map(name).join(', ')}`)
+        : `✓ ${step.outcome.map((g) => (g.length > 1 ? `${names(g)} still tied` : name(g[0]))).join(' › ')}`;
+    const undo = step.key === 'puttoff' ? puttoffUndo(puttoffKey(order)) : '';
+    // A putt-off still in progress is shown once, in its own card below.
+    if (step.key === 'puttoff' && tie.pending?.some((p) => p.key === puttoffKey(order))) return '';
+    return `<div class="tie-step">
+      <div class="step-label">${step.n}. ${esc(step.label)}</div>
+      <div class="step-vals">${order.map((idx) => `
+        <span>${teamDot(idx)}${name(idx)} <b>${fmtTieValue(step.key, step.values[idx])}</b></span>`).join('')}</div>
+      <div class="step-result ${step.outcome.length === 1 ? 'still' : ''}">${result} ${undo}</div>
+    </div>`;
+  };
+
+  const pendingHtml = (p) => {
+    const left = p.teams.filter((t) => !p.done.includes(t));
+    const sofar = p.done.length
+      ? `<p>So far: ${p.done.map((t, i) => `<b>${ORDINALS[i]}</b> ${name(t)}`).join(', ')}</p>` : '';
+    if (!puttoffMatters(ranked, left, stage)) {
+      return `<div class="tie-step">
+        <div class="step-label">${TIEBREAKERS.length}. Putt-off</div>
+        ${sofar}
+        <p class="muted">${names(left)} stay tied. No putt-off needed: it wouldn't change ${stage === 'seed' ? 'the matchups' : 'the winner'}.</p>
+        ${p.done.length ? puttoffUndo(p.key) : ''}
+      </div>`;
+    }
+    return `<div class="tie-step puttoff">
+      <div class="step-label">${TIEBREAKERS.length}. Putt-off ⛳</div>
+      ${sofar}
+      <p>${names(left)} are still dead even. Head to the putting green!</p>
+      <p class="muted">Tap the winner${left.length > 2 ? ', then the next finisher, and so on' : ''}:</p>
+      <div class="puttoff-btns">${left.map((t) => `
+        <button data-action="puttoff" data-stage="${stage}" data-key="${p.key}" data-team="${t}">${teamDot(t)}${name(t)}</button>`).join('')}</div>
+      ${p.done.length ? puttoffUndo(p.key) : ''}
+    </div>`;
+  };
+
+  return `<div class="card tie-panel">
+    <div class="tie-head">⚖️ Tiebreaker · ${title}</div>
+    <p class="muted">${sub}</p>
+    ${ties.map((tie) => `
+      <div class="tie">
+        <div class="tie-title">Tied on ${fmtPts(tie.points)} pts: ${names(tie.teams)}</div>
+        ${tie.steps.map((st) => stepHtml(st, tie)).join('')}
+        ${(tie.pending || []).map(pendingHtml).join('')}
+      </div>`).join('')}
+  </div>`;
+}
+
 // ---------- Leaderboard ----------
 
 function renderBoard() {
@@ -138,19 +225,37 @@ function renderBoard() {
   const standings = computeStandings(config, scores);
   const round = currentRound();
   const rounds = enabledRounds(config);
-  const ranked = rankTeams(config, scores, rounds.map((r) => r.id));
+  const allIds = rounds.map((r) => r.id);
   const allFinal = standings.matches.length > 0 && !rounds.some((r) => r.pending)
     && standings.matches.every((m) => m.result.done);
+
+  // Tiebreakers only show at the two checkpoints: when the rounds before the
+  // seeded day are all final (until that day starts), and at the very end.
+  const seeded = rounds.find((r) => r.seeded);
+  const seededStarted = seeded && standings.matches.some((m) => m.match.roundId === seeded.id && m.result.played > 0);
+  const seedStage = !allFinal && seeded?.priorFinal && !seededStarted;
+  const stage = seedStage ? 'seed' : 'final';
+  const { ranked } = rankTeams(config, scores, seedStage ? seeded.priorIds : allIds, stage);
+  let panel = '';
+  if (allFinal) {
+    const { ties } = rankTeams(config, scores, allIds, 'final');
+    if (ties.length) panel = tiePanel(config, 'Final standings', 'Teams finished level on points, so the tiebreakers decide the order.', ties, 'final', ranked);
+  } else if (seedStage) {
+    const { ties } = rankTeams(config, scores, seeded.priorIds, 'seed');
+    if (ties.length) panel = tiePanel(config, `${esc(seeded.day.split(' ')[0])} seeding`, `Teams are level on points after the earlier rounds, so the tiebreakers set ${esc(seeded.day.split(' ')[0])}'s matchups.`, ties, 'seed', ranked);
+  }
+  const showTiebreaks = !!panel;
 
   const teamRows = ranked.map((r, i) => {
     const t = standings.teams[r.idx];
     const rank = i > 0 && ranked[i - 1].rank === r.rank ? '' : r.rank;
     const live = t.projected !== t.points
       ? `<div class="live-pts">${fmtPts(t.projected)} if all live matches ended now</div>` : '';
-    const tb = r.unresolved ? '<div class="tiebreak">Still tied after every tiebreaker: flip a coin</div>'
-      : r.tiebreak ? `<div class="tiebreak">Tiebreaker: ${esc(r.tiebreak)}</div>` : '';
-    return `<div class="team-row" style="--team:${teamColor(t.idx)}">
-      <div class="rank">${rank}</div>
+    const tb = !showTiebreaks ? '' : r.unresolved ? '<div class="tiebreak">Tied on every tiebreaker</div>'
+      : r.tiebreak ? `<div class="tiebreak">Placed on tiebreaker: ${esc(r.tiebreak)}</div>` : '';
+    const winner = allFinal && i === 0 && !r.unresolved;
+    return `<div class="team-row ${winner ? 'winner' : ''}" style="--team:${teamColor(t.idx)}">
+      <div class="rank">${winner ? '🏆' : rank}</div>
       <div class="team-info">
         <div class="team-name">${esc(t.name)}</div>
         <div class="team-players">${t.players.map(playerName).join(' & ')} · ${t.w}-${t.l}-${t.h}</div>
@@ -167,11 +272,20 @@ function renderBoard() {
     b.birdies - a.birdies || playerName(a.id).localeCompare(playerName(b.id))));
 
   const champ = allFinal ? ranked[0] : null;
-  const champBanner = champ && !champ.unresolved ? `<div class="champ" style="--team:${teamColor(champ.idx)}">
+  let champBanner = '';
+  if (champ && !champ.unresolved) {
+    champBanner = `<div class="champ" style="--team:${teamColor(champ.idx)}">
       <div class="champ-cup">🏆</div>
       <div><div class="champ-name">${esc(champ.name)} are the champions</div>
       <div class="champ-sub">${champ.players.map(playerName).join(' & ')} · ${fmtPts(champ.points)} pts${champ.tiebreak ? ` · won on ${esc(champ.tiebreak.toLowerCase())}` : ''}</div></div>
-    </div>` : '';
+    </div>`;
+  } else if (champ) {
+    champBanner = `<div class="champ">
+      <div class="champ-cup">⛳</div>
+      <div><div class="champ-name">Tied for the title</div>
+      <div class="champ-sub">Every tiebreaker is even. The putt-off decides it (see below).</div></div>
+    </div>`;
+  }
 
   return `
     ${champBanner}
@@ -179,10 +293,11 @@ function renderBoard() {
       <h2>Team Standings</h2>
       <div class="card teams">${teamRows}</div>
       <p class="note">Win = 1 · Tie = ½ · Loss = 0 &nbsp;·&nbsp; 3 pts per team up for grabs each day</p>
+      ${panel}
       <details class="note tb-rules"><summary>Tiebreakers</summary>
         <p>If teams are level on points (for Tuesday's seeding after Monday, and for the final standings):</p>
-        <ol>${TIEBREAKERS.map((tb) => `<li>${tb.label}</li>`).join('')}<li>Still tied: flip a coin</li></ol>
-        <p><b>Head-to-head</b> counts points only from matches between the tied teams. <b>Holes-up margin</b> adds up how much each match was won or lost by (Won 3&2 = +3, lost 1 UP = −1). <b>Total strokes</b> is both players' scores added up over the rounds that count.</p>
+        <ol>${TIEBREAKERS.map((tb) => `<li>${tb.label}</li>`).join('')}</ol>
+        <p><b>Head-to-head</b> counts points only from matches between the tied teams. <b>Holes-up margin</b> adds up how much each match was won or lost by (Won 3&2 = +3, lost 1 UP = −1). <b>Total strokes</b> is both players' scores added up over the rounds that count. <b>Putt-off</b>: if it's still dead even, the tied teams settle it on the putting green and someone records the winner here.</p>
       </details>
     </section>
     <section>
@@ -595,6 +710,20 @@ app.addEventListener('click', async (e) => {
     case 'seeded': {
       const { round: ri, on } = el.dataset;
       saveSetup((c) => { c.rounds[ri].seeded = on === '1'; });
+      return;
+    }
+    case 'puttoff': {
+      const { stage, key } = el.dataset;
+      const team = Number(el.dataset.team);
+      saveSetup((c) => {
+        const list = ((c.puttoffs ||= {})[stage] ||= {})[key] ||= [];
+        if (!list.includes(team)) list.push(team);
+      });
+      return;
+    }
+    case 'puttoff-reset': {
+      const { stage, key } = el.dataset;
+      saveSetup((c) => { ((c.puttoffs ||= {})[stage] ||= {})[key] = []; });
       return;
     }
     case 'cross': {
