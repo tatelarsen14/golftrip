@@ -156,18 +156,17 @@ export function scoreMark(score, par) {
   return 'double';
 }
 
-// Birdies and eagles (or better) per player across every enabled round.
+// Birdies per player across every enabled round; an eagle or better counts as a birdie.
 export function birdieCounts(config, scores) {
   const counts = {};
-  config.teams.forEach((t) => t.players.forEach((p) => { counts[p] = { id: p, birdies: 0, eagles: 0 }; }));
+  config.teams.forEach((t) => t.players.forEach((p) => { counts[p] = { id: p, birdies: 0 }; }));
   for (const round of config.rounds) {
     if (!round.enabled) continue;
     for (const [pid, holes] of Object.entries(scores[round.id] || {})) {
       if (!counts[pid]) continue;
       for (const [hole, score] of Object.entries(holes)) {
         const mark = scoreMark(score, parFor(config, round.id, hole));
-        if (mark === 'birdie') counts[pid].birdies++;
-        if (mark === 'eagle') counts[pid].eagles++;
+        if (mark === 'birdie' || mark === 'eagle') counts[pid].birdies++;
       }
     }
   }

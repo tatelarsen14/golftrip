@@ -29,7 +29,7 @@ Used for Tuesday's seeding and for the final standings when teams are level on p
 
 ## Tabs
 
-- **Leaderboard**: team standings (with any tiebreaker shown, and a champion banner once Tuesday is final), live status of every match ("2 UP thru 6", "Won 3&2", "Dormie"), individual W-L-T and points, and the Birdie Board (birdies and eagles per player).
+- **Leaderboard**: team standings (with any tiebreaker shown, and a champion banner once Tuesday is final), live status of every match ("2 UP thru 6", "Won 3&2", "Dormie"), individual W-L-T and points, and the Birdie Board (birdies per player, eagles count as birdies).
 - **Scores**: pick the round, your group and the hole, then tap + / − for each player. The first tap sets par (from the course scorecard). Leave a score blank if you picked up.
 - **Cards**: a full 18-hole scorecard for each course, marked like a paper card (circle = birdie, double circle = eagle or better, square = bogey, double square = double bogey or worse), plus a card for each match with the best ball scores that counted highlighted.
 - **Trip**: the itinerary, tee times, lodging (tap to open maps), flights, crew phone numbers (tap to call) and the cost estimate.

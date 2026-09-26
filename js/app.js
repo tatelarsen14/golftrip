@@ -164,8 +164,7 @@ function renderBoard() {
   const players = Object.values(standings.players)
     .sort((a, b) => b.points - a.points || b.w - a.w || playerName(a.id).localeCompare(playerName(b.id)));
   const birdies = Object.values(birdieCounts(config, scores)).sort((a, b) => (
-    (b.birdies + b.eagles) - (a.birdies + a.eagles) || b.eagles - a.eagles
-    || playerName(a.id).localeCompare(playerName(b.id))));
+    b.birdies - a.birdies || playerName(a.id).localeCompare(playerName(b.id))));
 
   const champ = allFinal ? ranked[0] : null;
   const champBanner = champ && !champ.unresolved ? `<div class="champ" style="--team:${teamColor(champ.idx)}">
@@ -211,14 +210,14 @@ function renderBoard() {
       <h2>Birdie Board 🐦</h2>
       <div class="card">
         <table class="table">
-          <thead><tr><th></th><th>Player</th><th class="num">Birdies</th><th class="num">Eagles</th></tr></thead>
+          <thead><tr><th></th><th>Player</th><th class="num">Birdies</th></tr></thead>
           <tbody>${birdies.map((b, i) => `
             <tr><td class="muted">${i + 1}</td><td>${teamDot(teamOf(config, b.id))} ${esc(playerName(b.id))}</td>
-            <td class="num"><b>${b.birdies}</b></td><td class="num">${b.eagles}</td></tr>`).join('')}
+            <td class="num"><b>${b.birdies}</b></td></tr>`).join('')}
           </tbody>
         </table>
       </div>
-      <p class="note">Every hole of every tournament round counts, both nines.</p>
+      <p class="note">Every hole of every tournament round counts, both nines. An eagle counts as a birdie.</p>
     </section>`;
 }
 

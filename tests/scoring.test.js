@@ -134,8 +134,8 @@ test('birdie counts use each round\'s pars and skip disabled rounds', () => {
     sun: { tate: { 1: 3 } },
   };
   let counts = birdieCounts(c, scores);
-  assert.deepEqual([counts.tate.birdies, counts.tate.eagles], [4, 0]);
-  assert.deepEqual([counts.sam.birdies, counts.sam.eagles], [0, 1]);
+  assert.equal(counts.tate.birdies, 4);
+  assert.equal(counts.sam.birdies, 1); // eagle counts as a birdie
   c.rounds.find((r) => r.id === 'sun').enabled = false;
   counts = birdieCounts(c, scores);
   assert.equal(counts.tate.birdies, 3);
