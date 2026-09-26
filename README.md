@@ -13,12 +13,24 @@ Every round:
 
 Win = 1, tie = ½, loss = 0. Each team has 3 points up for grabs per day.
 Tournament rounds are Sat–Tue; Friday's round is just for fun and isn't tracked.
-Groups rotate so every team plays every other team.
+Sat–Mon groups rotate so every team plays every other team once. Tuesday is
+seeded: once every Sat–Mon match is final, 1st plays 2nd and 3rd plays 4th
+(shown as TBD until then).
+
+### Tiebreakers
+
+Used for Tuesday's seeding and for the final standings when teams are level on points:
+
+1. Head-to-head points (only matches between the tied teams)
+2. Most matches won
+3. Holes-up margin (Won 3&2 = +3, lost 1 UP = −1, summed over every match)
+4. Fewest total strokes (both players, all counted rounds)
+5. Still tied: flip a coin
 
 ## Tabs
 
-- **Leaderboard**: team standings, live status of every match ("2 UP thru 6", "Won 3&2", "Dormie"), individual W-L-T and points, and the Birdie Board (birdies and eagles per player).
-- **Scores**: pick the round, your group and the hole, then tap + / − for each player. The first tap sets par. Leave a score blank if you picked up. If a hole's par is wrong, tap the right one (3/4/5) and it's fixed for everyone.
+- **Leaderboard**: team standings (with any tiebreaker shown, and a champion banner once Tuesday is final), live status of every match ("2 UP thru 6", "Won 3&2", "Dormie"), individual W-L-T and points, and the Birdie Board (birdies and eagles per player).
+- **Scores**: pick the round, your group and the hole, then tap + / − for each player. The first tap sets par (from the course scorecard). Leave a score blank if you picked up.
 - **Cards**: a full 18-hole scorecard for each course, marked like a paper card (circle = birdie, double circle = eagle or better, square = bogey, double square = double bogey or worse), plus a card for each match with the best ball scores that counted highlighted.
 - **Trip**: the itinerary, tee times, lodging (tap to open maps), flights, crew phone numbers (tap to call) and the cost estimate.
 - **Setup**: tap your name, then set team names, swap players between teams (tap one, then another), pick each day's matchups and singles pairings, and choose which days count. Every change saves for everyone instantly.

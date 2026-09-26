@@ -1,9 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildMatches, computeMatch, computeStandings, sideScore, scoreMark, birdieCounts } from '../js/scoring.js';
+import {
+  buildMatches, computeMatch, computeStandings, sideScore, scoreMark, birdieCounts, rankTeams, resolveConfig,
+} from '../js/scoring.js';
 import { DEFAULT_CONFIG } from '../js/data.js';
 
 const cfg = structuredClone(DEFAULT_CONFIG);
+const BACK = [10, 11, 12, 13, 14, 15, 16, 17, 18];
 const holes = (arr, start = 1) => Object.fromEntries(arr.map((v, i) => [start + i, v]));
 
 test('builds 1 best ball + 2 singles per group, 6 matches per round', () => {
@@ -136,4 +139,67 @@ test('birdie counts use each round\'s pars and skip disabled rounds', () => {
   c.rounds.find((r) => r.id === 'sun').enabled = false;
   counts = birdieCounts(c, scores);
   assert.equal(counts.tate.birdies, 3);
+});
+
+// Every player shoots the same score on every hole of each nine.
+const round = (perPlayer) => Object.fromEntries(Object.entries(perPlayer).map(([p, [front, back]]) => (
+  [p, { ...holes(Array(9).fill(front), 1), ...holes(Array(9).fill(back), 10) }])));
+const teamScores = (byTeam) => {
+  const out = {};
+  cfg.teams.forEach((t, i) => t.players.forEach((p) => { out[p] = [byTeam[i], byTeam[i]]; }));
+  return round(out);
+};
+
+test('Tuesday is TBD until every Sat-Mon match is final, then seeds 1v2 and 3v4', () => {
+  // Team 4 best, then 3, 2, 1: they finish 4th, 3rd, 2nd, 1st in reverse.
+  const scores = { sat: teamScores([6, 5, 4, 3]), sun: teamScores([6, 5, 4, 3]), mon: teamScores([6, 5, 4, 3]) };
+  const back = BACK.map((h) => [h, scores.mon.tate[h]]);
+  for (const h of BACK) delete scores.mon.tate[h]; // Tate's Monday singles not played yet
+  let resolved = resolveConfig(cfg, scores);
+  let tue = resolved.rounds.find((r) => r.id === 'tue');
+  assert.equal(tue.pending, true);
+  assert.equal(buildMatches(resolved).some((m) => m.roundId === 'tue'), false);
+
+  for (const [h, v] of back) scores.mon.tate[h] = v;
+  resolved = resolveConfig(cfg, scores);
+  tue = resolved.rounds.find((r) => r.id === 'tue');
+  assert.equal(tue.pending, undefined);
+  assert.deepEqual(tue.groups.map((g) => g.teams), [[3, 2], [1, 0]]);
+  assert.equal(buildMatches(resolved).filter((m) => m.roundId === 'tue').length, 6);
+});
+
+test('head-to-head breaks a points tie', () => {
+  const scores = {
+    // Sat: Team 1 sweeps Team 2; Teams 3 and 4 halve everything.
+    sat: round({ tate: [3, 3], garrett: [3, 3], sam: [5, 5], jonah: [5, 5], josh: [4, 4], brody: [4, 4], jp: [4, 4], skyler: [4, 4] }),
+    // Sun: Team 3 sweeps Team 1; Team 2 sweeps Team 4.
+    sun: round({ tate: [5, 5], garrett: [5, 5], josh: [3, 3], brody: [3, 3], sam: [3, 3], jonah: [3, 3], jp: [5, 5], skyler: [5, 5] }),
+  };
+  const ranked = rankTeams(cfg, scores, ['sat', 'sun']);
+  assert.deepEqual(ranked.map((t) => [t.idx, t.points]), [[2, 4.5], [0, 3], [1, 3], [3, 1.5]]);
+  assert.equal(ranked[1].tiebreak, 'Head-to-head points');
+  assert.equal(ranked[1].rank, 2);
+  assert.equal(ranked[2].rank, 3);
+});
+
+test('holes-up margin breaks a tie when head-to-head and wins are level', () => {
+  // Sat only: Team 1 beats Team 2 2-1, Team 3 beats Team 4 2-1, but Team 3 by more.
+  const scores = {
+    sat: round({
+      // Team 1: best ball won 1 UP, Tate wins 5&4, Garrett loses 5&4 -> margin +1.
+      tate: [3, 3], garrett: [4, 5], sam: [4, 4], jonah: [4, 4],
+      // Team 3: best ball won 5&4, Josh wins 5&4, Brody loses 5&4 -> margin +5.
+      josh: [3, 3], brody: [5, 5], jp: [5, 5], skyler: [4, 4],
+    }),
+  };
+  Object.assign(scores.sat.tate, holes([4, 4, 4, 4, 4, 4, 4, 4, 3], 1));
+  const ranked = rankTeams(cfg, scores, ['sat']);
+  assert.deepEqual(ranked.slice(0, 2).map((t) => [t.idx, t.points, t.wins]), [[2, 2, 2], [0, 2, 2]]);
+  assert.equal(ranked[0].tiebreak, 'Holes-up margin');
+});
+
+test('dead even after every tiebreaker is flagged for a coin flip', () => {
+  const scores = { sat: teamScores([4, 4, 4, 4]) };
+  const ranked = rankTeams(cfg, scores, ['sat']);
+  assert.ok(ranked.every((t) => t.unresolved && t.rank === 1));
 });

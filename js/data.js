@@ -21,7 +21,8 @@ export const PLAYERS = [
 export const TEAM_COLORS = ['#2f7d4f', '#1f5f99', '#b5541c', '#7a3fa0'];
 
 // Groups rotate so every team sees every other team; singles opponents
-// alternate within the group. Friday's round isn't part of the tournament.
+// alternate within the group. Friday's round isn't part of the tournament,
+// and Tuesday is seeded from the standings after Monday.
 export const DEFAULT_CONFIG = {
   teams: [
     { name: 'Team 1', players: ['tate', 'garrett'] },
@@ -43,12 +44,12 @@ export const DEFAULT_CONFIG = {
       groups: [{ teams: [0, 3], cross: false }, { teams: [1, 2], cross: false }],
     },
     {
-      id: 'tue', date: '2026-10-06', day: 'Tue Oct 6', course: "Coeur d'Alene", enabled: true,
+      // Seeded: 1st v 2nd and 3rd v 4th once Sat-Mon are final.
+      id: 'tue', date: '2026-10-06', day: 'Tue Oct 6', course: "Coeur d'Alene", enabled: true, seeded: true,
       groups: [{ teams: [0, 1], cross: true }, { teams: [2, 3], cross: true }],
     },
   ],
-  // Par by hole for each round, from the course scorecards. Anyone can
-  // still correct a hole's par from the Scores tab.
+  // Par by hole for each round, from the course scorecards.
   pars: {
     sat: parsFrom([5, 4, 3, 4, 5, 4, 3, 4, 4, 4, 4, 5, 3, 4, 4, 3, 5, 4]), // Circling Raven, 72
     sun: parsFrom([4, 3, 5, 3, 4, 5, 4, 4, 3, 4, 3, 5, 4, 4, 5, 3, 4, 4]), // Scarecrow, 71

@@ -10,20 +10,21 @@ import { DEFAULT_CONFIG } from './data.js';
 const FIREBASE_VERSION = '10.12.2';
 const LOCAL_KEY = `golftrip:${TRIP_ID}`;
 
-// Saved config layered over the defaults. Pars merge hole by hole so a
-// correction on one hole never wipes the rest.
+// Saved setup layered over the defaults. Each saved round is merged over its
+// default so newer fields (like Tuesday's seeding) reach configs saved
+// before they existed. Pars always come from the scorecards in data.js.
 function withDefaults(saved) {
   const config = structuredClone(DEFAULT_CONFIG);
   if (saved?.teams) config.teams = saved.teams;
-  // Friday was dropped from the tournament after launch.
-  if (saved?.rounds) config.rounds = saved.rounds.filter((r) => r.id !== 'fri');
-  for (const [roundId, holes] of Object.entries(saved?.pars || {})) {
-    config.pars[roundId] = { ...config.pars[roundId], ...holes };
+  if (saved?.rounds) {
+    config.rounds = saved.rounds
+      .filter((r) => r.id !== 'fri') // Friday was dropped after launch
+      .map((r) => ({ ...DEFAULT_CONFIG.rounds.find((d) => d.id === r.id), ...r }));
   }
   return config;
 }
 
-// Teams and pairings only; pars are written one hole at a time by setPar.
+// Only teams and pairings are saved; pars are fixed.
 const setupFields = ({ teams, rounds }) => JSON.parse(JSON.stringify({ teams, rounds }));
 
 export async function createStore(onChange) {
@@ -58,10 +59,6 @@ function createLocalStore(onChange) {
     },
     async saveConfig(config) {
       store.config = { ...store.config, ...setupFields(config) };
-      persist();
-    },
-    async setPar(roundId, hole, par) {
-      (store.config.pars[roundId] ||= {})[hole] = par;
       persist();
     },
   };
@@ -121,11 +118,6 @@ async function createFirebaseStore(onChange) {
       store.config = { ...store.config, ...setupFields(config) };
       onChange();
       await fs.setDoc(configRef, setupFields(config), { merge: true });
-    },
-    async setPar(roundId, hole, par) {
-      (store.config.pars[roundId] ||= {})[hole] = par;
-      onChange();
-      await fs.setDoc(configRef, { pars: { [roundId]: { [hole]: par } } }, { merge: true });
     },
   };
 

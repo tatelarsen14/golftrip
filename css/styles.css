@@ -287,12 +287,25 @@ select, input[type=text] {
 .legend .mk { font-size: 11px; color: var(--ink); }
 .legend .mk.birdie, .legend .mk.eagle { color: var(--under); }
 
-.par-pick { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); margin-top: 6px; }
-.par-pick button {
-  width: 30px; height: 26px; border-radius: 8px; border: 1px solid var(--line); background: var(--cream);
-  font-weight: 700; font-size: 13px; padding: 0;
+.hole-par { font: 700 15px Oswald, sans-serif; color: var(--ink); letter-spacing: .04em; margin-top: 2px; }
+
+.tbd { border-style: dashed; text-align: center; }
+.tbd-title { font: 700 18px Oswald, sans-serif; text-transform: uppercase; letter-spacing: .06em; color: var(--forest); }
+.tbd p { margin: 6px 0 0; font-size: 13px; }
+.tiebreak { font-size: 11px; color: var(--forest-2); font-weight: 600; }
+.tb-rules summary { cursor: pointer; font-weight: 600; color: var(--forest-2); }
+.tb-rules ol { margin: 4px 0; padding-left: 20px; }
+.tb-rules p { margin: 4px 0; }
+.champ {
+  display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 14px 16px; border-radius: var(--radius);
+  background: linear-gradient(135deg, var(--forest), var(--forest-2)); color: var(--cream);
+  border-left: 6px solid var(--team); box-shadow: var(--shadow);
 }
-.par-pick button.on { background: var(--forest); color: var(--cream); border-color: var(--forest); }
+.champ-cup { font-size: 34px; }
+.champ-name { font: 700 19px Oswald, sans-serif; text-transform: uppercase; letter-spacing: .03em; }
+.champ-sub { font-size: 12px; opacity: .85; }
+.seeded { font-size: 13px; background: var(--cream); border-radius: 10px; padding: 8px 10px; }
+.seeded .link, .seed-link { padding: 0; margin-top: 4px; display: inline-block; }
 
 .sc.full th, .sc.full td { padding: 5px 3px; min-width: 28px; }
 .sc.full .sub, .sc.full .tot { background: var(--cream); font-weight: 700; }

@@ -1,13 +1,15 @@
 import { createStore } from './store.js';
 import { PLAYERS, TEAM_COLORS, TRIP, ITINERARY, FLIGHTS, ESTIMATE, MATCHUPS } from './data.js';
 import {
-  buildMatches, computeMatch, computeStandings, birdieCounts, parFor, scoreMark, FRONT_NINE, BACK_NINE,
+  buildMatches, computeMatch, computeStandings, birdieCounts, parFor, scoreMark, rankTeams, resolveConfig,
+  TIEBREAKERS, FRONT_NINE, BACK_NINE,
 } from './scoring.js';
 
 const UI_KEY = 'golftrip:ui';
 const app = document.getElementById('app');
 
 let store;
+let view; // store.config with seeded matchups filled in (or marked TBD)
 let pickedSlot = null; // Setup: first player tapped in a swap
 const ui = loadUI();
 
@@ -65,10 +67,10 @@ function defaultRoundId(config) {
 }
 
 function currentRound() {
-  const rounds = enabledRounds(store.config);
+  const rounds = enabledRounds(view);
   let round = rounds.find((r) => r.id === ui.roundId);
   if (!round) {
-    ui.roundId = defaultRoundId(store.config);
+    ui.roundId = defaultRoundId(view);
     round = rounds.find((r) => r.id === ui.roundId);
   }
   return round;
@@ -78,10 +80,25 @@ function groupLabel(config, group) {
   return group.teams.map((t) => esc(config.teams[t]?.name)).join(' vs ');
 }
 
+function groupTitle(round, gi) {
+  if (round.seeded) return gi === 0 ? '1st v 2nd' : '3rd v 4th';
+  return `Group ${gi + 1}`;
+}
+
+// Shown in place of a seeded round's matches until Sat-Mon are all final.
+function pendingNote(config, round) {
+  const ifNow = round.seeding.map(([a, b]) => `${esc(config.teams[a].name)} v ${esc(config.teams[b].name)}`).join(' · ');
+  return `<div class="card tbd">
+    <div class="tbd-title">Matchups TBD</div>
+    <p>Set when every earlier match is final: <b>1st v 2nd</b> and <b>3rd v 4th</b> in the standings.</p>
+    <p class="muted">If it ended now: ${ifNow}</p>
+  </div>`;
+}
+
 // ---------- shared components ----------
 
 function roundChips(activeId) {
-  return `<div class="chips" role="tablist">${enabledRounds(store.config).map((r) => `
+  return `<div class="chips" role="tablist">${enabledRounds(view).map((r) => `
     <button class="chip ${r.id === activeId ? 'on' : ''}" data-action="round" data-id="${r.id}">
       <span>${esc(r.day.split(' ')[0])}</span><small>${esc(r.course)}</small>
     </button>`).join('')}</div>`;
@@ -116,21 +133,28 @@ function matchCard(match, res, { compact = false } = {}) {
 // ---------- Leaderboard ----------
 
 function renderBoard() {
-  const { config, scores } = store;
+  const config = view;
+  const { scores } = store;
   const standings = computeStandings(config, scores);
   const round = currentRound();
-  const teams = [...standings.teams].sort((a, b) => b.points - a.points || b.projected - a.projected);
+  const rounds = enabledRounds(config);
+  const ranked = rankTeams(config, scores, rounds.map((r) => r.id));
+  const allFinal = standings.matches.length > 0 && !rounds.some((r) => r.pending)
+    && standings.matches.every((m) => m.result.done);
 
-  const teamRows = teams.map((t, i) => {
-    const rank = i > 0 && teams[i - 1].points === t.points ? '' : i + 1;
+  const teamRows = ranked.map((r, i) => {
+    const t = standings.teams[r.idx];
+    const rank = i > 0 && ranked[i - 1].rank === r.rank ? '' : r.rank;
     const live = t.projected !== t.points
       ? `<div class="live-pts">${fmtPts(t.projected)} if all live matches ended now</div>` : '';
+    const tb = r.unresolved ? '<div class="tiebreak">Still tied after every tiebreaker: flip a coin</div>'
+      : r.tiebreak ? `<div class="tiebreak">Tiebreaker: ${esc(r.tiebreak)}</div>` : '';
     return `<div class="team-row" style="--team:${teamColor(t.idx)}">
       <div class="rank">${rank}</div>
       <div class="team-info">
         <div class="team-name">${esc(t.name)}</div>
         <div class="team-players">${t.players.map(playerName).join(' & ')} · ${t.w}-${t.l}-${t.h}</div>
-        ${live}
+        ${live}${tb}
       </div>
       <div class="big-pts">${fmtPts(t.points)}</div>
     </div>`;
@@ -143,17 +167,30 @@ function renderBoard() {
     (b.birdies + b.eagles) - (a.birdies + a.eagles) || b.eagles - a.eagles
     || playerName(a.id).localeCompare(playerName(b.id))));
 
+  const champ = allFinal ? ranked[0] : null;
+  const champBanner = champ && !champ.unresolved ? `<div class="champ" style="--team:${teamColor(champ.idx)}">
+      <div class="champ-cup">🏆</div>
+      <div><div class="champ-name">${esc(champ.name)} win the Buckle Up Cup</div>
+      <div class="champ-sub">${champ.players.map(playerName).join(' & ')} · ${fmtPts(champ.points)} pts${champ.tiebreak ? ` · won on ${esc(champ.tiebreak.toLowerCase())}` : ''}</div></div>
+    </div>` : '';
+
   return `
+    ${champBanner}
     <section>
       <h2>Team Standings</h2>
       <div class="card teams">${teamRows}</div>
       <p class="note">Win = 1 · Tie = ½ · Loss = 0 &nbsp;·&nbsp; 3 pts per team up for grabs each day</p>
+      <details class="note tb-rules"><summary>Tiebreakers</summary>
+        <p>If teams are level on points (for Tuesday's seeding after Monday, and for the final standings):</p>
+        <ol>${TIEBREAKERS.map((tb) => `<li>${tb.label}</li>`).join('')}<li>Still tied: flip a coin</li></ol>
+        <p><b>Head-to-head</b> counts points only from matches between the tied teams. <b>Holes-up margin</b> adds up how much each match was won or lost by (Won 3&2 = +3, lost 1 UP = −1). <b>Total strokes</b> is both players' scores added up over the rounds that count.</p>
+      </details>
     </section>
     <section>
       <h2>Matches</h2>
       ${roundChips(round?.id)}
-      ${round ? round.groups.map((g, gi) => `
-        <h3>Group ${gi + 1} · ${groupLabel(config, g)}</h3>
+      ${round?.pending ? pendingNote(config, round) : round ? round.groups.map((g, gi) => `
+        <h3>${groupTitle(round, gi)} · ${groupLabel(config, g)}</h3>
         ${roundMatches.filter((m) => m.match.group === gi).map((m) => matchCard(m.match, m.result)).join('')}
       `).join('') : '<p class="empty">No rounds enabled.</p>'}
     </section>
@@ -188,9 +225,11 @@ function renderBoard() {
 // ---------- Score entry ----------
 
 function renderScores() {
-  const { config, scores } = store;
+  const config = view;
+  const { scores } = store;
   const round = currentRound();
   if (!round) return '<p class="empty">No rounds enabled. Turn one on in Setup.</p>';
+  if (round.pending) return `${roundChips(round.id)}${pendingNote(config, round)}`;
 
   if (ui.group == null || !round.groups[ui.group]) {
     const mine = ui.me ? round.groups.findIndex((g) => g.teams.includes(teamOf(config, ui.me))) : -1;
@@ -232,20 +271,18 @@ function renderScores() {
     ${roundChips(round.id)}
     <div class="seg">${round.groups.map((g, gi) => `
       <button class="${gi === ui.group ? 'on' : ''}" data-action="group" data-group="${gi}">
-        Group ${gi + 1}<small>${groupLabel(config, g)}</small>
+        ${groupTitle(round, gi)}<small>${groupLabel(config, g)}</small>
       </button>`).join('')}</div>
     <div class="holes">${holeBtns}</div>
     <div class="card entry">
       <div class="entry-head">
         <div><div class="hole-num">Hole ${hole}</div>
-        <div class="muted">${isFront ? 'Best Ball — low score on each team counts' : 'Singles match play'}</div>
-        <div class="par-pick">Par ${[3, 4, 5].map((n) => `
-          <button class="${n === par ? 'on' : ''}" data-action="par" data-par="${n}">${n}</button>`).join('')}</div></div>
+        <div class="hole-par">Par ${par ?? '–'}</div>
+        <div class="muted">${isFront ? 'Best Ball — low score on each team counts' : 'Singles match play'}</div></div>
         <span class="badge ${isFront ? 'bb' : 'sg'}">${isFront ? 'Best Ball' : 'Singles'}</span>
       </div>
       ${rows}
-      <p class="note">Everyone enters their own score. Picked up? Leave it blank${isFront ? ' — your partner\'s score counts' : ''}.
-        Par wrong on this hole? Tap the right one; it fixes it for everyone.</p>
+      <p class="note">Everyone enters their own score. Picked up? Leave it blank${isFront ? ' — your partner\'s score counts' : ''}.</p>
       <div class="nav-row">
         <button class="btn ghost" data-action="hole" data-hole="${Math.max(1, hole - 1)}" ${hole === 1 ? 'disabled' : ''}>← Hole ${hole - 1 || ''}</button>
         <button class="btn" data-action="hole" data-hole="${Math.min(18, hole + 1)}" ${hole === 18 ? 'disabled' : ''}>Hole ${hole < 18 ? hole + 1 : ''} →</button>
@@ -316,9 +353,14 @@ function courseCard(config, round, roundScores) {
 }
 
 function renderCards() {
-  const { config, scores } = store;
+  const config = view;
+  const { scores } = store;
   const round = currentRound();
   if (!round) return '<p class="empty">No rounds enabled.</p>';
+  if (round.pending) {
+    return `${roundChips(round.id)}<h2>${esc(round.course)} · ${esc(round.day)}</h2>
+      ${courseCard(config, round, {})}${pendingNote(config, round)}`;
+  }
   const roundScores = scores[round.id] || {};
   const pars = config.pars?.[round.id];
   const matches = buildMatches(config).filter((m) => m.roundId === round.id);
@@ -330,7 +372,7 @@ function renderCards() {
     ${LEGEND}
     <h2>Match cards</h2>
     ${round.groups.map((g, gi) => `
-      <h3>Group ${gi + 1} · ${groupLabel(config, g)}</h3>
+      <h3>${groupTitle(round, gi)} · ${groupLabel(config, g)}</h3>
       ${matches.filter((m) => m.group === gi).map((m) => {
         const res = computeMatch(m, roundScores);
         return `<div class="card sc-card">${matchCard(m, res, { compact: true })}${scorecard(m, res, roundScores, pars)}</div>`;
@@ -405,18 +447,24 @@ function renderSetup() {
     <p class="note">Each group plays best ball on the front 9, then two singles matches on the back 9.</p>
     ${config.rounds.map((r, ri) => {
       const cur = currentMatchup(r);
+      const resolved = view.rounds[ri];
       return `
       <div class="card setup-round ${r.enabled ? '' : 'off'}">
         <label class="toggle"><input type="checkbox" data-edit="round-enabled" data-round="${ri}" ${r.enabled ? 'checked' : ''}>
           <b>${esc(r.day)}</b><span class="muted">counts toward the tournament</span></label>
         <input type="text" value="${esc(r.course)}" data-edit="round-course" data-round="${ri}" aria-label="Course" enterkeyhint="done">
-        <div class="matchups">${MATCHUPS.map((m, mi) => `
+        ${r.seeded ? `<div class="seeded">
+            <b>Seeded from the standings</b> after the earlier rounds: 1st v 2nd, 3rd v 4th.
+            <button class="link" data-action="seeded" data-round="${ri}" data-on="0">Pick matchups instead</button></div>`
+          : `<div class="matchups">${MATCHUPS.map((m, mi) => `
           <button class="${mi === cur ? 'on' : ''}" data-action="matchup" data-round="${ri}" data-m="${mi}">
             <span>${matchupLabel(m[0])}</span><span>${matchupLabel(m[1])}</span></button>`).join('')}</div>
-        ${r.groups.map((g, gi) => {
+          ${ri === config.rounds.length - 1 ? `<button class="link seed-link" data-action="seeded" data-round="${ri}" data-on="1">Seed from standings instead</button>` : ''}`}
+        ${resolved.pending ? '<div class="singles-line">Singles: TBD until the matchups are set.</div>'
+          : resolved.groups.map((g, gi) => {
           const [a, b] = g.teams.map((t) => config.teams[t]);
           const pairs = g.cross ? [[0, 1], [1, 0]] : [[0, 0], [1, 1]];
-          return `<div class="singles-line">Group ${gi + 1} singles:
+          return `<div class="singles-line">${r.seeded ? groupTitle(r, gi) : `Group ${gi + 1}`} singles:
             <b>${pairs.map(([pa, pb]) => `${esc(playerName(a.players[pa]))} v ${esc(playerName(b.players[pb]))}`).join(' · ')}</b>
             <button class="link" data-action="cross" data-round="${ri}" data-group="${gi}">Swap</button></div>`;
         }).join('')}
@@ -464,6 +512,7 @@ const TABS = [
 ];
 
 function render() {
+  view = resolveConfig(store.config, store.scores);
   const tab = TABS.find((t) => t[0] === ui.tab) || TABS[0];
   const sync = store.mode === 'firebase'
     ? (store.online ? '<span class="sync on">● Live</span>' : '<span class="sync off">● Offline — will sync</span>')
@@ -518,9 +567,6 @@ app.addEventListener('click', async (e) => {
     case 'clear':
       store.setScore(round.id, el.dataset.player, ui.hole, null).catch(showError);
       return;
-    case 'par':
-      store.setPar(round.id, ui.hole, Number(el.dataset.par)).catch(showError);
-      return;
     case 'me':
       ui.me = ui.me === el.dataset.id ? null : el.dataset.id;
       ui.group = null;
@@ -545,6 +591,11 @@ app.addEventListener('click', async (e) => {
       saveSetup((c) => {
         c.rounds[ri].groups = MATCHUPS[m].map((teams, gi) => ({ teams, cross: !!c.rounds[ri].groups[gi]?.cross }));
       });
+      return;
+    }
+    case 'seeded': {
+      const { round: ri, on } = el.dataset;
+      saveSetup((c) => { c.rounds[ri].seeded = on === '1'; });
       return;
     }
     case 'cross': {

@@ -10,7 +10,7 @@ export const POINTS = { win: 1, halve: 0.5, loss: 0 };
 export function buildMatches(config) {
   const matches = [];
   for (const round of config.rounds) {
-    if (!round.enabled) continue;
+    if (!round.enabled || round.pending) continue;
     round.groups.forEach((group, gi) => {
       const [ta, tb] = group.teams;
       const teamA = config.teams[ta];
@@ -172,4 +172,104 @@ export function birdieCounts(config, scores) {
     }
   }
   return counts;
+}
+
+// ---------- Ranking, tiebreakers and seeding ----------
+
+// Tiebreakers, in order, when teams are level on points.
+export const TIEBREAKERS = [
+  { key: 'h2h', label: 'Head-to-head points' },
+  { key: 'wins', label: 'Most matches won' },
+  { key: 'margin', label: 'Holes-up margin' },
+  { key: 'strokes', label: 'Fewest total strokes' },
+];
+
+// Ranks teams on final match results in the given rounds.
+// Returns team stats in order, each with `rank`, `tiebreak` (label of the
+// tiebreaker that placed it, or null) and `unresolved` (still tied after
+// every tiebreaker: flip a coin).
+export function rankTeams(config, scores, roundIds) {
+  const stats = config.teams.map((t, idx) => ({
+    idx, name: t.name, players: t.players, points: 0, wins: 0, margin: 0, strokes: 0, h2h: {},
+  }));
+
+  for (const m of buildMatches(config).filter((x) => roundIds.includes(x.roundId))) {
+    const res = computeMatch(m, scores[m.roundId]);
+    if (!res.points) continue;
+    m.sides.forEach((side, si) => {
+      const t = stats[side.team];
+      const opp = m.sides[1 - si].team;
+      t.points += res.points[si];
+      t.h2h[opp] = (t.h2h[opp] || 0) + res.points[si];
+      if (res.leader === si) t.wins++;
+      if (res.leader !== null) t.margin += res.leader === si ? res.up : -res.up;
+    });
+  }
+  for (const t of stats) {
+    for (const rid of roundIds) {
+      for (const p of t.players) {
+        for (const v of Object.values(scores[rid]?.[p] || {})) if (isScore(v)) t.strokes += v;
+      }
+    }
+  }
+
+  const value = (t, key, tied) => {
+    if (key === 'points') return t.points;
+    if (key === 'h2h') return tied.reduce((a, o) => a + (o === t ? 0 : t.h2h[o.idx] || 0), 0);
+    if (key === 'strokes') return -t.strokes;
+    return t[key];
+  };
+  const keys = ['points', ...TIEBREAKERS.map((tb) => tb.key)];
+
+  // Split a tied group by the next criterion; head-to-head only counts
+  // matches among the teams still tied.
+  const order = (group, k) => {
+    if (group.length === 1) return group;
+    if (k === keys.length) {
+      group.forEach((t) => { t.unresolved = true; });
+      return group;
+    }
+    const buckets = new Map();
+    for (const t of group) {
+      const v = value(t, keys[k], group);
+      if (!buckets.has(v)) buckets.set(v, []);
+      buckets.get(v).push(t);
+    }
+    if (buckets.size > 1 && k > 0) group.forEach((t) => { t.tiebreak = TIEBREAKERS[k - 1].label; });
+    return [...buckets.entries()].sort((a, b) => b[0] - a[0]).flatMap(([, g]) => order(g, k + 1));
+  };
+
+  stats.forEach((t) => { t.tiebreak = null; t.unresolved = false; });
+  const ranked = order(stats, 0);
+  ranked.forEach((t, i) => {
+    const prev = ranked[i - 1];
+    t.rank = prev && t.unresolved && prev.unresolved && prev.points === t.points ? prev.rank : i + 1;
+  });
+  return ranked;
+}
+
+// Fills in seeded rounds: 1st v 2nd and 3rd v 4th on the standings from the
+// earlier rounds, once every one of those matches is final. Until then the
+// round is `pending` (matchups TBD) and `projected` holds the seeding as it
+// stands right now.
+export function resolveConfig(config, scores) {
+  const resolved = structuredClone(config);
+  const enabled = resolved.rounds.filter((r) => r.enabled);
+  enabled.forEach((round, i) => {
+    if (!round.seeded) return;
+    const prior = enabled.slice(0, i);
+    const priorIds = prior.map((r) => r.id);
+    const priorMatches = buildMatches({ ...resolved, rounds: prior });
+    const ready = prior.length > 0
+      && priorMatches.every((m) => computeMatch(m, scores[m.roundId]).done);
+    const ranked = rankTeams(resolved, scores, priorIds).map((t) => t.idx);
+    const seeding = [[ranked[0], ranked[1]], [ranked[2], ranked[3]]];
+    round.seeding = seeding;
+    if (ready) {
+      round.groups = seeding.map((teams, gi) => ({ teams, cross: !!round.groups[gi]?.cross }));
+    } else {
+      round.pending = true;
+    }
+  });
+  return resolved;
 }
