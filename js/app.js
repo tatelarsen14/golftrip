@@ -290,8 +290,6 @@ function renderBoard() {
   }).join('');
 
   const roundMatches = standings.matches.filter((m) => m.match.roundId === round?.id);
-  const players = Object.values(standings.players)
-    .sort((a, b) => b.points - a.points || b.w - a.w || playerName(a.id).localeCompare(playerName(b.id)));
   const birdies = Object.values(birdieCounts(config, scores)).sort((a, b) => (
     b.birdies - a.birdies || playerName(a.id).localeCompare(playerName(b.id))));
 
@@ -345,19 +343,6 @@ function renderBoard() {
         </table>
       </div>
       <p class="note">Every hole of every tournament round counts, both nines. An eagle counts as a birdie.</p>
-    </section>
-    <section>
-      <h2>Individual</h2>
-      <div class="card">
-        <table class="table">
-          <thead><tr><th></th><th>Player</th><th>W-L-T</th><th class="num">Pts</th></tr></thead>
-          <tbody>${players.map((p, i) => `
-            <tr><td class="muted">${i + 1}</td><td>${teamDot(p.team)} ${esc(playerName(p.id))}</td>
-            <td>${p.w}-${p.l}-${p.h}</td><td class="num"><b>${fmtPts(p.points)}</b></td></tr>`).join('')}
-          </tbody>
-        </table>
-      </div>
-      <p class="note">Best ball results count for both teammates.</p>
     </section>`;
 }
 
