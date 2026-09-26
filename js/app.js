@@ -1,12 +1,14 @@
 import { createStore } from './store.js';
-import { PLAYERS, TEAM_COLORS, TRIP, ITINERARY, FLIGHTS, ESTIMATE } from './data.js';
-import { buildMatches, computeMatch, computeStandings, FRONT_NINE, BACK_NINE } from './scoring.js';
+import { PLAYERS, TEAM_COLORS, TRIP, ITINERARY, FLIGHTS, ESTIMATE, MATCHUPS } from './data.js';
+import {
+  buildMatches, computeMatch, computeStandings, birdieCounts, parFor, scoreMark, FRONT_NINE, BACK_NINE,
+} from './scoring.js';
 
 const UI_KEY = 'golftrip:ui';
 const app = document.getElementById('app');
 
 let store;
-let draftConfig = null; // unsaved Setup edits
+let pickedSlot = null; // Setup: first player tapped in a swap
 const ui = loadUI();
 
 // ---------- helpers ----------
@@ -30,6 +32,19 @@ const teamOf = (config, pid) => config.teams.findIndex((t) => t.players.includes
 const teamColor = (idx) => TEAM_COLORS[idx % TEAM_COLORS.length];
 const fmtPts = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, ''));
 const sideLabel = (side) => side.players.map(playerName).join(' & ');
+
+// A score with its scorecard mark: circle, double circle, square, double square.
+function marked(score, par) {
+  if (!score) return '';
+  return `<span class="mk ${scoreMark(score, par)}">${score}</span>`;
+}
+
+const LEGEND = `<div class="legend">
+  <span><span class="mk eagle">3</span> Eagle+</span>
+  <span><span class="mk birdie">3</span> Birdie</span>
+  <span><span class="mk bogey">5</span> Bogey</span>
+  <span><span class="mk double">6</span> Double+</span>
+</div>`;
 
 function enabledRounds(config) {
   return config.rounds.filter((r) => r.enabled);
@@ -124,6 +139,9 @@ function renderBoard() {
   const roundMatches = standings.matches.filter((m) => m.match.roundId === round?.id);
   const players = Object.values(standings.players)
     .sort((a, b) => b.points - a.points || b.w - a.w || playerName(a.id).localeCompare(playerName(b.id)));
+  const birdies = Object.values(birdieCounts(config, scores)).sort((a, b) => (
+    (b.birdies + b.eagles) - (a.birdies + a.eagles) || b.eagles - a.eagles
+    || playerName(a.id).localeCompare(playerName(b.id))));
 
   return `
     <section>
@@ -151,6 +169,19 @@ function renderBoard() {
         </table>
       </div>
       <p class="note">Best ball results count for both teammates.</p>
+    </section>
+    <section>
+      <h2>Birdie Board 🐦</h2>
+      <div class="card">
+        <table class="table">
+          <thead><tr><th></th><th>Player</th><th class="num">Birdies</th><th class="num">Eagles</th></tr></thead>
+          <tbody>${birdies.map((b, i) => `
+            <tr><td class="muted">${i + 1}</td><td>${teamDot(teamOf(config, b.id))} ${esc(playerName(b.id))}</td>
+            <td class="num"><b>${b.birdies}</b></td><td class="num">${b.eagles}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <p class="note">Every hole of every tournament round counts, both nines.</p>
     </section>`;
 }
 
@@ -170,6 +201,7 @@ function renderScores() {
   const roundScores = scores[round.id] || {};
   const players = group.teams.flatMap((t) => config.teams[t].players.map((p) => ({ id: p, team: t })));
   const isFront = hole <= 9;
+  const par = parFor(config, round.id, hole);
 
   const holeBtns = [...FRONT_NINE, ...BACK_NINE].map((h) => {
     const complete = players.every((p) => roundScores[p.id]?.[h]);
@@ -186,7 +218,7 @@ function renderScores() {
       <div class="entry-name">${esc(playerName(p.id))}<small>${total ? `${total} total` : ''}</small></div>
       <div class="stepper">
         <button data-action="step" data-player="${p.id}" data-delta="-1" aria-label="Minus">−</button>
-        <output class="${v ? '' : 'blank'}">${v || '–'}</output>
+        <output class="${v ? '' : 'blank'}">${v ? marked(v, par) : '–'}</output>
         <button data-action="step" data-player="${p.id}" data-delta="1" aria-label="Plus">+</button>
       </div>
       <button class="clear" data-action="clear" data-player="${p.id}" aria-label="Clear" ${v ? '' : 'disabled'}>✕</button>
@@ -206,11 +238,14 @@ function renderScores() {
     <div class="card entry">
       <div class="entry-head">
         <div><div class="hole-num">Hole ${hole}</div>
-        <div class="muted">${isFront ? 'Best Ball — low score on each team counts' : 'Singles match play'}</div></div>
+        <div class="muted">${isFront ? 'Best Ball — low score on each team counts' : 'Singles match play'}</div>
+        <div class="par-pick">Par ${[3, 4, 5].map((n) => `
+          <button class="${n === par ? 'on' : ''}" data-action="par" data-par="${n}">${n}</button>`).join('')}</div></div>
         <span class="badge ${isFront ? 'bb' : 'sg'}">${isFront ? 'Best Ball' : 'Singles'}</span>
       </div>
       ${rows}
-      <p class="note">Everyone enters their own score. Picked up? Leave it blank${isFront ? ' — your partner\'s score counts' : ''}.</p>
+      <p class="note">Everyone enters their own score. Picked up? Leave it blank${isFront ? ' — your partner\'s score counts' : ''}.
+        Par wrong on this hole? Tap the right one; it fixes it for everyone.</p>
       <div class="nav-row">
         <button class="btn ghost" data-action="hole" data-hole="${Math.max(1, hole - 1)}" ${hole === 1 ? 'disabled' : ''}>← Hole ${hole - 1 || ''}</button>
         <button class="btn" data-action="hole" data-hole="${Math.min(18, hole + 1)}" ${hole === 18 ? 'disabled' : ''}>Hole ${hole < 18 ? hole + 1 : ''} →</button>
@@ -222,9 +257,8 @@ function renderScores() {
 
 // ---------- Scorecards ----------
 
-function scorecard(match, res, roundScores) {
+function scorecard(match, res, roundScores, pars) {
   const holes = match.holes;
-  const cell = (v) => (v ? v : '');
   const playerRows = match.sides.flatMap((side) => side.players.map((p) => {
     const vals = holes.map((h) => roundScores?.[p]?.[h]);
     const tot = vals.filter(Boolean).reduce((a, b) => a + b, 0);
@@ -232,7 +266,7 @@ function scorecard(match, res, roundScores) {
       ${vals.map((v, i) => {
         const h = res.holes[i];
         const counted = match.type === 'bestball' && v && v === (side === match.sides[0] ? h.a : h.b);
-        return `<td class="${counted ? 'counted' : ''}">${cell(v)}</td>`;
+        return `<td class="${counted ? 'counted' : ''}">${marked(v, pars?.[match.holes[i]])}</td>`;
       }).join('')}<td class="tot">${tot || ''}</td></tr>`;
   }));
   const status = res.holes.map((h) => {
@@ -248,36 +282,60 @@ function scorecard(match, res, roundScores) {
     </tbody></table></div>`;
 }
 
+// Traditional 18-hole card for the whole field, marked up like a paper card.
+function courseCard(config, round, roundScores) {
+  const pars = config.pars?.[round.id] || {};
+  const sum = (holes, fn) => holes.reduce((a, h) => a + (fn(h) || 0), 0);
+  const nine = (holes, fn, cls = '') => holes.map((h) => `<td class="${cls}">${fn(h)}</td>`).join('');
+  const parOut = sum(FRONT_NINE, (h) => pars[h]);
+  const parIn = sum(BACK_NINE, (h) => pars[h]);
+
+  const rows = round.groups.map((g, gi) => g.teams.flatMap((t) => config.teams[t].players.map((p) => {
+    const sc = roundScores[p] || {};
+    const played = [...FRONT_NINE, ...BACK_NINE].filter((h) => sc[h]);
+    const out = sum(FRONT_NINE, (h) => sc[h]);
+    const inn = sum(BACK_NINE, (h) => sc[h]);
+    const toPar = played.reduce((a, h) => a + sc[h] - (pars[h] || 0), 0);
+    const toParTxt = !played.length ? '' : toPar === 0 ? 'E' : toPar > 0 ? `+${toPar}` : String(toPar);
+    return `<tr class="${gi > 0 && t === g.teams[0] && p === config.teams[t].players[0] ? 'group-start' : ''}">
+      <th>${teamDot(t)}${esc(playerName(p))}</th>
+      ${nine(FRONT_NINE, (h) => marked(sc[h], pars[h]))}<td class="sub">${out || ''}</td>
+      ${nine(BACK_NINE, (h) => marked(sc[h], pars[h]))}<td class="sub">${inn || ''}</td>
+      <td class="tot">${out + inn || ''}</td><td class="topar ${toPar < 0 ? 'under' : ''}">${toParTxt}</td>
+    </tr>`;
+  })).join('')).join('');
+
+  return `<div class="card sc-card"><div class="sc-wrap"><table class="sc full">
+    <thead><tr><th>Hole</th>${FRONT_NINE.map((h) => `<th>${h}</th>`).join('')}<th>Out</th>
+      ${BACK_NINE.map((h) => `<th>${h}</th>`).join('')}<th>In</th><th>Tot</th><th>±</th></tr></thead>
+    <tbody>
+      <tr class="par-row"><th>Par</th>${nine(FRONT_NINE, (h) => pars[h] ?? '')}<td class="sub">${parOut}</td>
+        ${nine(BACK_NINE, (h) => pars[h] ?? '')}<td class="sub">${parIn}</td><td class="tot">${parOut + parIn}</td><td></td></tr>
+      ${rows}
+    </tbody></table></div></div>`;
+}
+
 function renderCards() {
   const { config, scores } = store;
   const round = currentRound();
   if (!round) return '<p class="empty">No rounds enabled.</p>';
   const roundScores = scores[round.id] || {};
+  const pars = config.pars?.[round.id];
   const matches = buildMatches(config).filter((m) => m.roundId === round.id);
-
-  // 18-hole gross totals for bragging rights.
-  const gross = config.teams.flatMap((t) => t.players).map((p) => {
-    const vals = Object.values(roundScores[p] || {});
-    return { p, total: vals.reduce((a, b) => a + b, 0), holes: vals.length };
-  }).filter((g) => g.holes > 0).sort((a, b) => a.total - b.total);
 
   return `
     ${roundChips(round.id)}
+    <h2>${esc(round.course)} · ${esc(round.day)}</h2>
+    ${courseCard(config, round, roundScores)}
+    ${LEGEND}
+    <h2>Match cards</h2>
     ${round.groups.map((g, gi) => `
       <h3>Group ${gi + 1} · ${groupLabel(config, g)}</h3>
       ${matches.filter((m) => m.group === gi).map((m) => {
         const res = computeMatch(m, roundScores);
-        return `<div class="card sc-card">${matchCard(m, res, { compact: true })}${scorecard(m, res, roundScores)}</div>`;
+        return `<div class="card sc-card">${matchCard(m, res, { compact: true })}${scorecard(m, res, roundScores, pars)}</div>`;
       }).join('')}`).join('')}
-    <h3>Gross scores · ${esc(round.course)}</h3>
-    <div class="card">
-      ${gross.length ? `<table class="table">${gross.map((g) => `
-        <tr><td>${teamDot(teamOf(config, g.p))} ${esc(playerName(g.p))}</td>
-        <td class="muted">${g.holes === 18 ? '18 holes' : `thru ${g.holes}`}</td>
-        <td class="num"><b>${g.total}</b></td></tr>`).join('')}</table>`
-        : '<p class="empty">No scores yet.</p>'}
-    </div>
-    <p class="note">Highlighted scores are the ones counting for best ball. The match row shows how many holes up the leading side is (in their team color).</p>`;
+    <p class="note">Green-shaded scores are the ones counting for best ball. The match row shows how many holes up the leading side is (in their team color).</p>`;
 }
 
 // ---------- Trip ----------
@@ -317,85 +375,82 @@ function renderTrip() {
 
 // ---------- Setup ----------
 
-function validate(config) {
-  const errors = [];
-  const all = config.teams.flatMap((t) => t.players);
-  for (const p of PLAYERS) {
-    const n = all.filter((x) => x === p.id).length;
-    if (n !== 1) errors.push(`${p.name} is on ${n} teams`);
-  }
-  for (const r of config.rounds) {
-    if (!r.enabled) continue;
-    const used = r.groups.flatMap((g) => g.teams);
-    if (new Set(used).size !== used.length) errors.push(`${r.day}: a team is in both groups`);
-  }
-  return errors;
-}
-
 function renderSetup() {
-  const config = draftConfig || store.config;
-  const dirty = !!draftConfig;
-  const errors = validate(config);
-  const teamSelect = (value, attrs) => `<select ${attrs}>${config.teams.map((t, i) => `
-    <option value="${i}" ${i === value ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select>`;
+  const { config } = store;
+  const me = ui.me ? playerName(ui.me) : null;
+
+  const matchupLabel = ([a, b]) => `${esc(config.teams[a].name)} v ${esc(config.teams[b].name)}`;
+  const currentMatchup = (r) => MATCHUPS.findIndex(([g1]) => r.groups.some((g) => (
+    g.teams.includes(g1[0]) && g.teams.includes(g1[1]))));
 
   return `
     <h2>Who are you?</h2>
     <div class="card">
-      <select data-action="me">
-        <option value="">Pick your name…</option>
-        ${PLAYERS.map((p) => `<option value="${p.id}" ${ui.me === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
-      </select>
-      <p class="note">Used to open your group first on the Scores tab. Saved on this phone only.</p>
+      <div class="name-grid">${PLAYERS.map((p) => `
+        <button class="${ui.me === p.id ? 'on' : ''}" data-action="me" data-id="${p.id}">${esc(p.name)}</button>`).join('')}</div>
+      <p class="note">${me ? `You're <b>${esc(me)}</b>. The Scores tab opens to your group.` : 'Tap your name so the Scores tab opens to your group.'} Saved on this phone.</p>
     </div>
+
+    <h2>Teams</h2>
+    <p class="note">Tap a player, then tap another player to swap them. Changes save for everyone right away.</p>
+    ${config.teams.map((t, ti) => `
+      <div class="card setup-team" style="--team:${teamColor(ti)}">
+        <input type="text" value="${esc(t.name)}" data-edit="team-name" data-team="${ti}" aria-label="Team name" enterkeyhint="done">
+        <div class="two">${t.players.map((pid, si) => `
+          <button class="player-chip ${pickedSlot?.team === ti && pickedSlot?.slot === si ? 'picked' : ''}"
+            data-action="pick-player" data-team="${ti}" data-slot="${si}">${esc(playerName(pid))}</button>`).join('')}</div>
+      </div>`).join('')}
+
+    <h2>Daily matchups</h2>
+    <p class="note">Each group plays best ball on the front 9, then two singles matches on the back 9.</p>
+    ${config.rounds.map((r, ri) => {
+      const cur = currentMatchup(r);
+      return `
+      <div class="card setup-round ${r.enabled ? '' : 'off'}">
+        <label class="toggle"><input type="checkbox" data-edit="round-enabled" data-round="${ri}" ${r.enabled ? 'checked' : ''}>
+          <b>${esc(r.day)}</b><span class="muted">counts toward the tournament</span></label>
+        <input type="text" value="${esc(r.course)}" data-edit="round-course" data-round="${ri}" aria-label="Course" enterkeyhint="done">
+        <div class="matchups">${MATCHUPS.map((m, mi) => `
+          <button class="${mi === cur ? 'on' : ''}" data-action="matchup" data-round="${ri}" data-m="${mi}">
+            <span>${matchupLabel(m[0])}</span><span>${matchupLabel(m[1])}</span></button>`).join('')}</div>
+        ${r.groups.map((g, gi) => {
+          const [a, b] = g.teams.map((t) => config.teams[t]);
+          const pairs = g.cross ? [[0, 1], [1, 0]] : [[0, 0], [1, 1]];
+          return `<div class="singles-line">Group ${gi + 1} singles:
+            <b>${pairs.map(([pa, pb]) => `${esc(playerName(a.players[pa]))} v ${esc(playerName(b.players[pb]))}`).join(' · ')}</b>
+            <button class="link" data-action="cross" data-round="${ri}" data-group="${gi}">Swap</button></div>`;
+        }).join('')}
+      </div>`;
+    }).join('')}
 
     <h2>Sync</h2>
     <div class="card">
       ${store.mode === 'firebase'
         ? `<p>✅ <b>Live sync is on.</b> Scores appear on everyone's phone instantly and are saved offline if you lose signal.</p>`
-        : `<p>⚠️ <b>Local mode.</b> Scores are only saved on this device. Add a Firebase config in <code>js/firebase-config.js</code> so the whole crew shares one scoreboard (see README).</p>`}
-    </div>
-
-    <h2>Teams</h2>
-    ${config.teams.map((t, ti) => `
-      <div class="card setup-team" style="--team:${teamColor(ti)}">
-        <input type="text" value="${esc(t.name)}" data-edit="team-name" data-team="${ti}" aria-label="Team name">
-        <div class="two">${t.players.map((pid, si) => `
-          <select data-edit="team-player" data-team="${ti}" data-slot="${si}">
-            ${PLAYERS.map((p) => `<option value="${p.id}" ${p.id === pid ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
-          </select>`).join('')}</div>
-      </div>`).join('')}
-
-    <h2>Daily pairings</h2>
-    <p class="note">Each group plays best ball on the front 9, then two singles matches on the back 9. "Swap singles" changes who plays who within the group.</p>
-    ${config.rounds.map((r, ri) => `
-      <div class="card setup-round ${r.enabled ? '' : 'off'}">
-        <label class="toggle"><input type="checkbox" data-edit="round-enabled" data-round="${ri}" ${r.enabled ? 'checked' : ''}>
-          <b>${esc(r.day)}</b></label>
-        <input type="text" value="${esc(r.course)}" data-edit="round-course" data-round="${ri}" aria-label="Course">
-        ${r.groups.map((g, gi) => {
-          const [a, b] = g.teams.map((t) => config.teams[t]);
-          const pairs = g.cross ? [[0, 1], [1, 0]] : [[0, 0], [1, 1]];
-          return `<div class="setup-group">
-            <div class="vs">Group ${gi + 1}:
-              ${teamSelect(g.teams[0], `data-edit="group-team" data-round="${ri}" data-group="${gi}" data-side="0"`)}
-              vs
-              ${teamSelect(g.teams[1], `data-edit="group-team" data-round="${ri}" data-group="${gi}" data-side="1"`)}
-            </div>
-            <div class="singles-line">Singles: ${pairs.map(([pa, pb]) => `${esc(playerName(a?.players[pa]))} v ${esc(playerName(b?.players[pb]))}`).join(' · ')}
-              <button class="link" data-action="cross" data-round="${ri}" data-group="${gi}">Swap singles</button></div>
-          </div>`;
-        }).join('')}
-      </div>`).join('')}
-
-    ${dirty ? '<div class="save-spacer"></div>' : ''}
-    <div class="save-bar ${dirty ? 'show' : ''}">
-      ${errors.length ? `<div class="errors">${errors.map(esc).join('<br>')}</div>` : ''}
-      <div class="nav-row">
-        <button class="btn ghost" data-action="discard">Discard</button>
-        <button class="btn" data-action="save" ${errors.length ? 'disabled' : ''}>Save for everyone</button>
-      </div>
+        : `<p>⚠️ <b>Local mode.</b> Scores are only saved on this device.</p>`}
     </div>`;
+}
+
+// Apply a Setup change and save it for everyone immediately.
+function saveSetup(fn) {
+  const config = structuredClone(store.config);
+  fn(config);
+  store.saveConfig(config).catch(showError);
+  toast('Saved for everyone ✓');
+}
+
+let toastTimer;
+function toast(msg) {
+  let el = document.getElementById('toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toast';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
 }
 
 // ---------- shell ----------
@@ -418,7 +473,7 @@ function render() {
   app.dataset.tab = tab[0];
   app.innerHTML = `
     <header class="top">
-      <div><h1>${esc(TRIP.title)}</h1><div class="sub">Buckle Up Cup · Match Play</div></div>
+      <div><h1>${esc(TRIP.title)}</h1><div class="sub">Buckle Up Cup${ui.me ? ` · ${esc(playerName(ui.me))}` : ' · Match Play'}</div></div>
       ${sync}
     </header>
     <main>${tab[3]()}</main>
@@ -427,12 +482,6 @@ function render() {
         <span>${icon}</span>${label}</button>`).join('')}</nav>`;
   if (keepScroll) window.scrollTo(0, scrollY);
   saveUI();
-}
-
-function editDraft(fn) {
-  draftConfig ||= structuredClone(store.config);
-  fn(draftConfig);
-  render();
 }
 
 app.addEventListener('click', async (e) => {
@@ -444,6 +493,7 @@ app.addEventListener('click', async (e) => {
   switch (action) {
     case 'tab':
       ui.tab = el.dataset.tab;
+      pickedSlot = null;
       window.scrollTo(0, 0);
       app.dataset.tab = '';
       break;
@@ -460,49 +510,60 @@ app.addEventListener('click', async (e) => {
     case 'step': {
       const cur = store.scores[round.id]?.[el.dataset.player]?.[ui.hole];
       const delta = Number(el.dataset.delta);
-      const next = cur ? Math.min(15, Math.max(1, cur + delta)) : 4;
+      // First tap on a blank score starts at par.
+      const next = cur ? Math.min(15, Math.max(1, cur + delta)) : (parFor(store.config, round.id, ui.hole) || 4);
       store.setScore(round.id, el.dataset.player, ui.hole, next).catch(showError);
       return;
     }
     case 'clear':
       store.setScore(round.id, el.dataset.player, ui.hole, null).catch(showError);
       return;
-    case 'cross': {
-      const { round: ri, group: gi } = el.dataset;
-      editDraft((c) => { c.rounds[ri].groups[gi].cross = !c.rounds[ri].groups[gi].cross; });
+    case 'par':
+      store.setPar(round.id, ui.hole, Number(el.dataset.par)).catch(showError);
+      return;
+    case 'me':
+      ui.me = ui.me === el.dataset.id ? null : el.dataset.id;
+      ui.group = null;
+      break;
+    case 'pick-player': {
+      const slot = { team: Number(el.dataset.team), slot: Number(el.dataset.slot) };
+      if (!pickedSlot || (pickedSlot.team === slot.team && pickedSlot.slot === slot.slot)) {
+        pickedSlot = pickedSlot ? null : slot;
+        break;
+      }
+      const a = pickedSlot;
+      pickedSlot = null;
+      saveSetup((c) => {
+        const pa = c.teams[a.team].players[a.slot];
+        c.teams[a.team].players[a.slot] = c.teams[slot.team].players[slot.slot];
+        c.teams[slot.team].players[slot.slot] = pa;
+      });
       return;
     }
-    case 'discard':
-      draftConfig = null;
-      break;
-    case 'save':
-      try {
-        await store.saveConfig(draftConfig);
-        draftConfig = null;
-      } catch (err) {
-        showError(err);
-      }
-      break;
+    case 'matchup': {
+      const { round: ri, m } = el.dataset;
+      saveSetup((c) => {
+        c.rounds[ri].groups = MATCHUPS[m].map((teams, gi) => ({ teams, cross: !!c.rounds[ri].groups[gi]?.cross }));
+      });
+      return;
+    }
+    case 'cross': {
+      const { round: ri, group: gi } = el.dataset;
+      saveSetup((c) => { c.rounds[ri].groups[gi].cross = !c.rounds[ri].groups[gi].cross; });
+      return;
+    }
   }
   render();
 });
 
 app.addEventListener('change', (e) => {
   const el = e.target;
-  if (el.dataset.action === 'me') {
-    ui.me = el.value || null;
-    ui.group = null;
-    render();
-    return;
-  }
-  const { edit, team, slot, round, group, side } = el.dataset;
+  const { edit, team, round } = el.dataset;
   if (!edit) return;
-  editDraft((c) => {
+  saveSetup((c) => {
     if (edit === 'team-name') c.teams[team].name = el.value.trim() || `Team ${Number(team) + 1}`;
-    if (edit === 'team-player') c.teams[team].players[slot] = el.value;
     if (edit === 'round-enabled') c.rounds[round].enabled = el.checked;
-    if (edit === 'round-course') c.rounds[round].course = el.value.trim();
-    if (edit === 'group-team') c.rounds[round].groups[group].teams[side] = Number(el.value);
+    if (edit === 'round-course') c.rounds[round].course = el.value.trim() || c.rounds[round].course;
   });
 });
 

@@ -139,3 +139,37 @@ export function computeStandings(config, scores) {
 
   return { matches: results, teams, players };
 }
+
+export function parFor(config, roundId, hole) {
+  return config.pars?.[roundId]?.[hole] ?? null;
+}
+
+// Scorecard marking: circle a birdie, double circle an eagle or better,
+// square a bogey, double square a double bogey or worse.
+export function scoreMark(score, par) {
+  if (!isScore(score) || !par) return '';
+  const d = score - par;
+  if (d <= -2) return 'eagle';
+  if (d === -1) return 'birdie';
+  if (d === 0) return 'par';
+  if (d === 1) return 'bogey';
+  return 'double';
+}
+
+// Birdies and eagles (or better) per player across every enabled round.
+export function birdieCounts(config, scores) {
+  const counts = {};
+  config.teams.forEach((t) => t.players.forEach((p) => { counts[p] = { id: p, birdies: 0, eagles: 0 }; }));
+  for (const round of config.rounds) {
+    if (!round.enabled) continue;
+    for (const [pid, holes] of Object.entries(scores[round.id] || {})) {
+      if (!counts[pid]) continue;
+      for (const [hole, score] of Object.entries(holes)) {
+        const mark = scoreMark(score, parFor(config, round.id, hole));
+        if (mark === 'birdie') counts[pid].birdies++;
+        if (mark === 'eagle') counts[pid].eagles++;
+      }
+    }
+  }
+  return counts;
+}

@@ -12,15 +12,16 @@ Every round:
 | Back 9 | **Singles** match play, 1 v 1 within the same group | 1 per match |
 
 Win = 1, tie = ½, loss = 0. Each team has 3 points up for grabs per day.
+Tournament rounds are Sat–Tue; Friday's round is just for fun and isn't tracked.
 Groups rotate so every team plays every other team.
 
 ## Tabs
 
-- **Leaderboard**: team standings, live status of every match ("2 UP thru 6", "Won 3&2", "Dormie"), and individual W-L-T and points.
-- **Scores**: pick the round, your group and the hole, then tap + / − for each player. The first tap sets a 4. Leave a score blank if you picked up.
-- **Cards**: hole-by-hole scorecards for each match, with the best ball scores that counted highlighted, plus gross totals for the day.
+- **Leaderboard**: team standings, live status of every match ("2 UP thru 6", "Won 3&2", "Dormie"), individual W-L-T and points, and the Birdie Board (birdies and eagles per player).
+- **Scores**: pick the round, your group and the hole, then tap + / − for each player. The first tap sets par. Leave a score blank if you picked up. If a hole's par is wrong, tap the right one (3/4/5) and it's fixed for everyone.
+- **Cards**: a full 18-hole scorecard for each course, marked like a paper card (circle = birdie, double circle = eagle or better, square = bogey, double square = double bogey or worse), plus a card for each match with the best ball scores that counted highlighted.
 - **Trip**: the itinerary, tee times, lodging (tap to open maps), flights, crew phone numbers (tap to call) and the cost estimate.
-- **Setup**: pick who you are, then set team names and players, daily pairings, who plays who in singles, and which days count.
+- **Setup**: tap your name, then set team names, swap players between teams (tap one, then another), pick each day's matchups and singles pairings, and choose which days count. Every change saves for everyone instantly.
 
 ## Run it locally
 

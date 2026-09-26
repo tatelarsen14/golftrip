@@ -10,10 +10,21 @@ import { DEFAULT_CONFIG } from './data.js';
 const FIREBASE_VERSION = '10.12.2';
 const LOCAL_KEY = `golftrip:${TRIP_ID}`;
 
-function withDefaults(config) {
-  if (!config?.teams || !config?.rounds) return structuredClone(DEFAULT_CONFIG);
+// Saved config layered over the defaults. Pars merge hole by hole so a
+// correction on one hole never wipes the rest.
+function withDefaults(saved) {
+  const config = structuredClone(DEFAULT_CONFIG);
+  if (saved?.teams) config.teams = saved.teams;
+  // Friday was dropped from the tournament after launch.
+  if (saved?.rounds) config.rounds = saved.rounds.filter((r) => r.id !== 'fri');
+  for (const [roundId, holes] of Object.entries(saved?.pars || {})) {
+    config.pars[roundId] = { ...config.pars[roundId], ...holes };
+  }
   return config;
 }
+
+// Teams and pairings only; pars are written one hole at a time by setPar.
+const setupFields = ({ teams, rounds }) => JSON.parse(JSON.stringify({ teams, rounds }));
 
 export async function createStore(onChange) {
   if (FIREBASE_CONFIG) {
@@ -46,7 +57,11 @@ function createLocalStore(onChange) {
       persist();
     },
     async saveConfig(config) {
-      store.config = config;
+      store.config = { ...store.config, ...setupFields(config) };
+      persist();
+    },
+    async setPar(roundId, hole, par) {
+      (store.config.pars[roundId] ||= {})[hole] = par;
       persist();
     },
   };
@@ -103,9 +118,14 @@ async function createFirebaseStore(onChange) {
       }, { merge: true });
     },
     async saveConfig(config) {
-      store.config = config;
+      store.config = { ...store.config, ...setupFields(config) };
       onChange();
-      await fs.setDoc(configRef, JSON.parse(JSON.stringify(config)));
+      await fs.setDoc(configRef, setupFields(config), { merge: true });
+    },
+    async setPar(roundId, hole, par) {
+      (store.config.pars[roundId] ||= {})[hole] = par;
+      onChange();
+      await fs.setDoc(configRef, { pars: { [roundId]: { [hole]: par } } }, { merge: true });
     },
   };
 

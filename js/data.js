@@ -21,7 +21,7 @@ export const PLAYERS = [
 export const TEAM_COLORS = ['#2f7d4f', '#1f5f99', '#b5541c', '#7a3fa0'];
 
 // Groups rotate so every team sees every other team; singles opponents
-// alternate each day within the group.
+// alternate within the group. Friday's round isn't part of the tournament.
 export const DEFAULT_CONFIG = {
   teams: [
     { name: 'Team 1', players: ['tate', 'garrett'] },
@@ -31,34 +31,51 @@ export const DEFAULT_CONFIG = {
   ],
   rounds: [
     {
-      id: 'fri', date: '2026-10-02', day: 'Fri Oct 2', course: 'Spokane (TBD)', enabled: true,
+      id: 'sat', date: '2026-10-03', day: 'Sat Oct 3', course: 'Circling Raven', enabled: true,
       groups: [{ teams: [0, 1], cross: false }, { teams: [2, 3], cross: false }],
     },
     {
-      id: 'sat', date: '2026-10-03', day: 'Sat Oct 3', course: 'Circling Raven', enabled: true,
+      id: 'sun', date: '2026-10-04', day: 'Sun Oct 4', course: 'Scarecrow', enabled: true,
       groups: [{ teams: [0, 2], cross: true }, { teams: [1, 3], cross: true }],
     },
     {
-      id: 'sun', date: '2026-10-04', day: 'Sun Oct 4', course: 'Scarecrow', enabled: true,
+      id: 'mon', date: '2026-10-05', day: 'Mon Oct 5', course: 'Gamble Sands', enabled: true,
       groups: [{ teams: [0, 3], cross: false }, { teams: [1, 2], cross: false }],
     },
     {
-      id: 'mon', date: '2026-10-05', day: 'Mon Oct 5', course: 'Gamble Sands', enabled: true,
+      id: 'tue', date: '2026-10-06', day: 'Tue Oct 6', course: "Coeur d'Alene", enabled: true,
       groups: [{ teams: [0, 1], cross: true }, { teams: [2, 3], cross: true }],
     },
-    {
-      id: 'tue', date: '2026-10-06', day: 'Tue Oct 6', course: "Coeur d'Alene", enabled: true,
-      groups: [{ teams: [0, 2], cross: false }, { teams: [1, 3], cross: false }],
-    },
   ],
+  // Par by hole for each round. Anyone can correct a hole's par from the
+  // Scores tab; unconfirmed holes default to 4.
+  pars: {
+    // Back nine from the published scorecard (course par 72).
+    sat: parsFrom([4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 3, 4, 4, 3, 5, 4]),
+    sun: parsFrom(Array(18).fill(4)), // par 71
+    // Back nine from the published scorecard (course par 72).
+    mon: parsFrom([4, 4, 4, 4, 4, 4, 4, 4, 4, 3, 4, 4, 5, 4, 4, 3, 4, 5]),
+    tue: parsFrom(Array(18).fill(4)), // par 71
+  },
 };
+
+function parsFrom(list) {
+  return Object.fromEntries(list.map((par, i) => [i + 1, par]));
+}
+
+// The three ways to split four teams into two groups.
+export const MATCHUPS = [
+  [[0, 1], [2, 3]],
+  [[0, 2], [1, 3]],
+  [[0, 3], [1, 2]],
+];
 
 export const ITINERARY = [
   {
     day: 'Friday', date: 'Oct 2', title: 'Spokane',
     items: [
       { icon: '✈️', time: '8:00 AM', text: 'Fly SLC → Spokane (GEG)' },
-      { icon: '⛳', text: 'Play golf — TBD Spokane course', sub: '$50 – $100' },
+      { icon: '⛳', text: 'Play golf — TBD Spokane course', sub: '$50 – $100 · just for fun, not part of the tournament' },
     ],
     stay: { name: 'Airbnb', address: '4203 North Atlantic Street, Spokane, WA 99205' },
   },
