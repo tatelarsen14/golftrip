@@ -1,0 +1,9 @@
+{
+  "name": "Washington / Idaho Golf Trip",
+  "short_name": "Golf Trip",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#f4efe3",
+  "theme_color": "#16402b",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

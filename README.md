@@ -1,0 +1,65 @@
+# ⛳ Washington / Idaho Golf Trip — Oct 2–6, 2026
+
+A mobile web app for the trip's match play tournament: 8 players, 4 teams of two.
+
+## Format
+
+Every round:
+
+| Holes | Format | Points |
+|---|---|---|
+| Front 9 | **Best ball** match play, team vs team (each player enters their own score, low score on the team counts) | 1 per match |
+| Back 9 | **Singles** match play, 1 v 1 within the same group | 1 per match |
+
+Win = 1, tie = ½, loss = 0. Each team has 3 points up for grabs per day.
+Groups rotate so every team plays every other team.
+
+## Tabs
+
+- **Leaderboard**: team standings, live status of every match ("2 UP thru 6", "Won 3&2", "Dormie"), and individual W-L-T and points.
+- **Scores**: pick the round, your group and the hole, then tap + / − for each player. The first tap sets a 4. Leave a score blank if you picked up.
+- **Cards**: hole-by-hole scorecards for each match, with the best ball scores that counted highlighted, plus gross totals for the day.
+- **Trip**: the itinerary, tee times, lodging (tap to open maps), flights, crew phone numbers (tap to call) and the cost estimate.
+- **Setup**: pick who you are, then set team names and players, daily pairings, who plays who in singles, and which days count.
+
+## Run it locally
+
+```bash
+npm start          # serves on http://localhost:8080
+npm test           # scoring tests
+```
+
+## Turn on live sync (so everyone shares one scoreboard)
+
+Without this, scores only save on the phone they were entered on. Firebase's
+free tier is plenty for this.
+
+1. Go to <https://console.firebase.google.com>, click **Add project** (analytics can be off).
+2. **Build → Firestore Database → Create database**. Pick a US location and start in **production mode**.
+3. On the **Rules** tab, paste this and **Publish**:
+   ```
+   rules_version = '2';
+   service cloud.firestore {
+     match /databases/{database}/documents {
+       match /trips/{tripId}/{document=**} {
+         allow read, write: if true;
+       }
+     }
+   }
+   ```
+   There's no login, so anyone with the link can edit scores. That's fine for a trip with friends; just don't post the link publicly.
+4. **Project settings (gear) → General → Your apps → Web (`</>`)**, register an app and copy the `firebaseConfig` object.
+5. Paste it into `js/firebase-config.js` as `FIREBASE_CONFIG`, then commit.
+
+The header shows **● Live** when syncing. Scores entered with no signal are
+saved on the phone and upload when it reconnects.
+
+## Host it
+
+Any static host works. There's no build step.
+
+- **GitHub Pages**: repo **Settings → Pages → Deploy from a branch**, pick the branch and `/ (root)`. Private repos need a paid GitHub plan for Pages.
+- **Firebase Hosting**: `npx firebase-tools init hosting` (public dir `.`), then `npx firebase-tools deploy`.
+- **Netlify**: drag the folder onto <https://app.netlify.com/drop>.
+
+Then have everyone open the link and use **Share → Add to Home Screen** so it works like an app.
