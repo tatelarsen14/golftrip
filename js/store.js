@@ -35,8 +35,9 @@ const setupFields = ({ teams, rounds, puttoffs = {} }) => JSON.parse(JSON.string
 
 const newId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
-// Photos are shrunk before upload (phone photos are 3-8 MB); videos go up as is.
-async function shrinkImage(file, maxSide = 1600) {
+// Photos are resized to full-HD (1920px on the long side, 1080p quality)
+// before upload, since phone originals are 3-8 MB; videos go up as recorded.
+async function shrinkImage(file, maxSide = 1920) {
   try {
     const bitmap = await createImageBitmap(file);
     const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
@@ -44,7 +45,7 @@ async function shrinkImage(file, maxSide = 1600) {
     canvas.width = Math.round(bitmap.width * scale);
     canvas.height = Math.round(bitmap.height * scale);
     canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.82));
+    const blob = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.88));
     return blob || file;
   } catch {
     return file;

@@ -454,3 +454,9 @@ label.btn.disabled { opacity: .4; }
 .rp-stats, .rp-rounds { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; margin-top: 6px; }
 .rp-rounds { color: var(--muted); }
 .rp-rounds b { color: var(--ink); }
+
+/* spectators */
+.guest-box { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 10px; text-align: left; }
+.guest-title { font-weight: 700; font-size: 14px; }
+.guest-box .muted { font-size: 12px; margin: 2px 0 6px; }
+.spectator-note { background: var(--cream); border-radius: 10px; padding: 8px 10px; font-size: 13px; margin: 8px 0 0; }

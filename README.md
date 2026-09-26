@@ -45,9 +45,9 @@ Streaks: 🔥 next to a side that has won 2+ holes in a row in its match (🥶 f
 
 **Trip recap**: once the last match is final, the champion banner and the Trip tab link to a recap page with final standings, awards (MVP, Birdie King, Low Round, Hottest Hand, Longest Run, Crowd Favorite, Paparazzi), day-by-day results, the best photos and every player's rounds. Share it with a `#recap` link.
 
-**Names**: the first time someone opens the app it asks who they are (tap the name in the header to change it).
+**Names**: the first time someone opens the app it asks who they are (tap the name in the header to change it). People who aren't playing can join as a **spectator** with their own name: they can post, react and comment, but can't enter scores or record putt-offs.
 
-**Setup is hidden** for everyone except phones that opened the admin link once: `<site>/#admin=fore-8317`. "Hide Setup here" in Setup locks it again. This hides the tab; it isn't a password on the database.
+**Setup is hidden** unless the name picked on that phone is Tate (the organizer). This hides the tab; it isn't a password.
 
 ## Photos and videos (Firebase Storage)
 
@@ -70,7 +70,7 @@ Uploads need Firebase Storage, which requires the pay-as-you-go (Blaze) plan:
    }
    ```
 
-Photos are shrunk to about 1600px before upload; videos can be up to 200 MB.
+Photos are resized to full-HD (1920px on the long side) before upload; videos go up as recorded (1080p recommended) and can be up to 200 MB.
 
 ## Run it locally
 

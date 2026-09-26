@@ -7,9 +7,8 @@ import {
 } from './scoring.js';
 
 const UI_KEY = 'golftrip:ui';
-const ADMIN_KEY = 'golftrip:admin';
-// Opening the app with #admin=<code> shows the Setup tab on that phone.
-const ADMIN_CODE = 'fore-8317';
+// Setup only shows on phones where the organizer picked his own name.
+const ORGANIZER = 'tate';
 const app = document.getElementById('app');
 
 let store;
@@ -37,7 +36,10 @@ function saveUI() {
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const playerName = (id) => PLAYERS.find((p) => p.id === id)?.name ?? id;
+// Spectators are stored as "g:<name>"; they can post but not enter scores.
+const GUEST = 'g:';
+const playerName = (id) => (id?.startsWith(GUEST) ? id.slice(GUEST.length) : PLAYERS.find((p) => p.id === id)?.name ?? id);
+const isPlayer = () => PLAYERS.some((p) => p.id === ui.me);
 const teamOf = (config, pid) => config.teams.findIndex((t) => t.players.includes(pid));
 const teamColor = (idx) => TEAM_COLORS[idx % TEAM_COLORS.length];
 const fmtPts = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, ''));
@@ -219,9 +221,10 @@ function tiePanel(config, title, sub, ties, stage, ranked) {
       <div class="step-label">${TIEBREAKERS.length}. Putt-off ⛳</div>
       ${sofar}
       <p>${names(left)} are still dead even. Head to the putting green!</p>
-      <p class="muted">Tap the winner${left.length > 2 ? ', then the next finisher, and so on' : ''}:</p>
+      ${isPlayer() ? `<p class="muted">Tap the winner${left.length > 2 ? ', then the next finisher, and so on' : ''}:</p>
       <div class="puttoff-btns">${left.map((t) => `
-        <button data-action="puttoff" data-stage="${stage}" data-key="${p.key}" data-team="${t}">${teamDot(t)}${name(t)}</button>`).join('')}</div>
+        <button data-action="puttoff" data-stage="${stage}" data-key="${p.key}" data-team="${t}">${teamDot(t)}${name(t)}</button>`).join('')}</div>`
+        : '<p class="muted">A player records the winner here.</p>'}
       ${p.done.length ? puttoffUndo(p.key) : ''}
     </div>`;
   };
@@ -389,18 +392,20 @@ function renderScores() {
     const n = birdieStreak(config, round.id, roundScores[pid]);
     return n >= 2 ? `<span class="streak hot" title="${n} birdies in a row">🐦🔥${n}</span>` : '';
   };
+  const canScore = isPlayer();
   const rows = players.map((p) => {
     const v = roundScores[p.id]?.[hole];
     const total = Object.values(roundScores[p.id] || {}).reduce((a, b) => a + b, 0);
     return `<div class="entry-row">
       ${teamDot(p.team)}
       <div class="entry-name">${esc(playerName(p.id))}${bStreak(p.id)}<small>${total ? `${total} total` : ''}</small></div>
-      <div class="stepper">
+      ${canScore ? `<div class="stepper">
         <button data-action="step" data-player="${p.id}" data-delta="-1" aria-label="Minus">−</button>
         <output class="${v ? '' : 'blank'}">${v ? marked(v, par) : '–'}</output>
         <button data-action="step" data-player="${p.id}" data-delta="1" aria-label="Plus">+</button>
       </div>
-      <button class="clear" data-action="clear" data-player="${p.id}" aria-label="Clear" ${v ? '' : 'disabled'}>✕</button>
+      <button class="clear" data-action="clear" data-player="${p.id}" aria-label="Clear" ${v ? '' : 'disabled'}>✕</button>`
+        : `<div class="stepper"><output class="${v ? '' : 'blank'}">${v ? marked(v, par) : '–'}</output></div>`}
     </div>`;
   }).join('');
 
@@ -422,6 +427,7 @@ function renderScores() {
         <span class="badge ${isFront ? 'bb' : 'sg'}">${isFront ? 'Best Ball' : 'Singles'}</span>
       </div>
       ${rows}
+      ${canScore ? '' : `<p class="spectator-note">👀 Spectator view: only players enter scores.${ui.me ? '' : ' <button class="link" data-action="change-me">Are you a player?</button>'}</p>`}
       <p class="note">Everyone enters their own score. Picked up? Leave it blank${isFront ? ' — your partner\'s score counts' : ''}.</p>
       <div class="nav-row">
         <button class="btn ghost" data-action="hole" data-hole="${Math.max(1, hole - 1)}" ${hole === 1 ? 'disabled' : ''}>← Hole ${hole - 1 || ''}</button>
@@ -568,11 +574,8 @@ function renderSetup() {
 
   return `
     <div class="card admin-note">
-      <p>🔒 <b>Only you see this tab.</b> Setup is unlocked on this phone only; everyone else just sees the other tabs.</p>
-      <div class="nav-row">
-        <button class="btn ghost" data-action="tab" data-tab="recap">Preview trip recap</button>
-        <button class="btn ghost" data-action="lock-admin">Hide Setup here</button>
-      </div>
+      <p>🔒 <b>Only Tate sees this tab.</b> It shows when Tate is picked as the name; everyone else just sees the other tabs.</p>
+      <button class="btn ghost" data-action="tab" data-tab="recap">Preview trip recap</button>
     </div>
 
     <h2>Teams</h2>
@@ -917,7 +920,16 @@ function namePicker() {
     <p class="muted">Tap your name. Your group opens first on the Scores tab, and it's how your posts are signed. Saved on this phone.</p>
     <div class="name-grid">${PLAYERS.map((p) => `
       <button class="${ui.me === p.id ? 'on' : ''}" data-action="set-me" data-id="${p.id}">${esc(p.name)}</button>`).join('')}</div>
-    <button class="link" data-action="close-picker">${ui.me ? 'Cancel' : 'Just watching'}</button>
+    <div class="guest-box">
+      <div class="guest-title">Not playing? Follow along as a spectator</div>
+      <p class="muted">You can post photos, react and comment, but not enter scores.</p>
+      <div class="comment-box">
+        <input type="text" id="guest-name" data-draft="guest" maxlength="24" placeholder="Your name"
+          value="${esc(drafts.guest ?? (ui.me?.startsWith(GUEST) ? playerName(ui.me) : ''))}" enterkeyhint="done">
+        <button class="btn small" data-action="set-guest">Join</button>
+      </div>
+    </div>
+    <button class="link" data-action="close-picker">${ui.me ? 'Cancel' : 'Just look around'}</button>
   </div></div>`;
 }
 
@@ -934,9 +946,7 @@ const TABS = [
 // Reached from the champion banner, the Trip tab or a #recap link.
 const HIDDEN_TABS = [['recap', '', 'Recap', renderRecap]];
 
-function isAdmin() {
-  try { return localStorage.getItem(ADMIN_KEY) === '1'; } catch { return false; }
-}
+const isAdmin = () => ui.me === ORGANIZER;
 
 function render() {
   // Don't yank a video someone is watching; re-render when it stops.
@@ -960,7 +970,7 @@ function render() {
   app.dataset.tab = tab[0];
   app.innerHTML = `
     <header class="top">
-      <div><h1>${esc(TRIP.title)}</h1><button class="sub" data-action="change-me">Buckle Up · ${ui.me ? `${esc(playerName(ui.me))} ▾` : 'Pick your name ▾'}</button></div>
+      <div><h1>${esc(TRIP.title)}</h1><button class="sub" data-action="change-me">Buckle Up · ${ui.me ? `${esc(playerName(ui.me))}${isPlayer() ? '' : ' (spectator)'} ▾` : 'Pick your name ▾'}</button></div>
       ${sync}
     </header>
     <main>${tab[3]()}</main>
@@ -1006,6 +1016,7 @@ app.addEventListener('click', async (e) => {
       ui.hole = Number(el.dataset.hole);
       break;
     case 'step': {
+      if (!isPlayer()) return;
       const cur = store.scores[round.id]?.[el.dataset.player]?.[ui.hole];
       const delta = Number(el.dataset.delta);
       // First tap on a blank score starts at par.
@@ -1014,6 +1025,7 @@ app.addEventListener('click', async (e) => {
       return;
     }
     case 'clear':
+      if (!isPlayer()) return;
       store.setScore(round.id, el.dataset.player, ui.hole, null).catch(showError);
       return;
     case 'set-me':
@@ -1021,17 +1033,25 @@ app.addEventListener('click', async (e) => {
       ui.pickingMe = false;
       ui.group = null;
       break;
+    case 'set-guest': {
+      const name = (drafts.guest || '').trim().slice(0, 24);
+      if (!name) { document.getElementById('guest-name')?.focus(); return; }
+      if (PLAYERS.some((p) => p.name.toLowerCase() === name.toLowerCase())) {
+        alert(`${name} is a player. Tap the name above instead.`);
+        return;
+      }
+      ui.me = GUEST + name;
+      ui.pickingMe = false;
+      drafts.guest = undefined;
+      if (ui.tab === 'setup') ui.tab = 'board';
+      break;
+    }
     case 'change-me':
       ui.pickingMe = true;
       break;
     case 'close-picker':
       ui.pickingMe = false;
       if (!ui.me) ui.watching = true;
-      break;
-    case 'lock-admin':
-      try { localStorage.removeItem(ADMIN_KEY); } catch {}
-      ui.tab = 'board';
-      toast('Setup hidden on this phone');
       break;
     case 'feed-filter':
       ui.feedFilter = el.dataset.id;
@@ -1105,6 +1125,7 @@ app.addEventListener('click', async (e) => {
       return;
     }
     case 'puttoff': {
+      if (!isPlayer()) return;
       const { stage, key } = el.dataset;
       const team = Number(el.dataset.team);
       saveSetup((c) => {
@@ -1177,16 +1198,9 @@ function showError(err) {
   alert(`Couldn't save: ${err.message || err}`);
 }
 
-// #admin=<code> unlocks Setup on this phone; #recap opens the recap.
+// #recap opens the recap.
 function readHash() {
-  if (location.hash === `#admin=${ADMIN_CODE}`) {
-    try { localStorage.setItem(ADMIN_KEY, '1'); } catch {}
-    ui.tab = 'setup';
-    history.replaceState(null, '', location.pathname + location.search);
-    setTimeout(() => toast('Setup unlocked on this phone'), 300);
-  } else if (location.hash === '#recap') {
-    ui.tab = 'recap';
-  }
+  if (location.hash === '#recap') ui.tab = 'recap';
 }
 
 (async () => {
