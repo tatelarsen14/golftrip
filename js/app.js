@@ -169,7 +169,7 @@ function renderBoard() {
   const champ = allFinal ? ranked[0] : null;
   const champBanner = champ && !champ.unresolved ? `<div class="champ" style="--team:${teamColor(champ.idx)}">
       <div class="champ-cup">🏆</div>
-      <div><div class="champ-name">${esc(champ.name)} win the Buckle Up Cup</div>
+      <div><div class="champ-name">${esc(champ.name)} are the champions</div>
       <div class="champ-sub">${champ.players.map(playerName).join(' & ')} · ${fmtPts(champ.points)} pts${champ.tiebreak ? ` · won on ${esc(champ.tiebreak.toLowerCase())}` : ''}</div></div>
     </div>` : '';
 
@@ -194,19 +194,6 @@ function renderBoard() {
       `).join('') : '<p class="empty">No rounds enabled.</p>'}
     </section>
     <section>
-      <h2>Individual</h2>
-      <div class="card">
-        <table class="table">
-          <thead><tr><th></th><th>Player</th><th>W-L-T</th><th class="num">Pts</th></tr></thead>
-          <tbody>${players.map((p, i) => `
-            <tr><td class="muted">${i + 1}</td><td>${teamDot(p.team)} ${esc(playerName(p.id))}</td>
-            <td>${p.w}-${p.l}-${p.h}</td><td class="num"><b>${fmtPts(p.points)}</b></td></tr>`).join('')}
-          </tbody>
-        </table>
-      </div>
-      <p class="note">Best ball results count for both teammates.</p>
-    </section>
-    <section>
       <h2>Birdie Board 🐦</h2>
       <div class="card">
         <table class="table">
@@ -218,6 +205,19 @@ function renderBoard() {
         </table>
       </div>
       <p class="note">Every hole of every tournament round counts, both nines. An eagle counts as a birdie.</p>
+    </section>
+    <section>
+      <h2>Individual</h2>
+      <div class="card">
+        <table class="table">
+          <thead><tr><th></th><th>Player</th><th>W-L-T</th><th class="num">Pts</th></tr></thead>
+          <tbody>${players.map((p, i) => `
+            <tr><td class="muted">${i + 1}</td><td>${teamDot(p.team)} ${esc(playerName(p.id))}</td>
+            <td>${p.w}-${p.l}-${p.h}</td><td class="num"><b>${fmtPts(p.points)}</b></td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <p class="note">Best ball results count for both teammates.</p>
     </section>`;
 }
 
@@ -521,7 +521,7 @@ function render() {
   app.dataset.tab = tab[0];
   app.innerHTML = `
     <header class="top">
-      <div><h1>${esc(TRIP.title)}</h1><div class="sub">Buckle Up Cup${ui.me ? ` · ${esc(playerName(ui.me))}` : ' · Match Play'}</div></div>
+      <div><h1>${esc(TRIP.title)}</h1><div class="sub">Buckle Up${ui.me ? ` · ${esc(playerName(ui.me))}` : ' · Match Play'}</div></div>
       ${sync}
     </header>
     <main>${tab[3]()}</main>
