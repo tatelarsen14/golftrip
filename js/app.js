@@ -1,5 +1,5 @@
 import { createStore, MAX_VIDEO_MB } from './store.js';
-import { PLAYERS, TEAM_COLORS, TRIP, ITINERARY, FLIGHTS, ESTIMATE, MATCHUPS } from './data.js';
+import { PLAYERS, TEAM_COLORS, TRIP, ITINERARY, FLIGHTS, MATCHUPS } from './data.js';
 import {
   buildMatches, computeMatch, computeStandings, birdieCounts, parFor, scoreMark, rankTeams, resolveConfig,
   TIEBREAKERS, FRONT_NINE, BACK_NINE, puttoffKey,
@@ -543,12 +543,7 @@ function renderCards() {
 
 // ---------- Trip ----------
 
-function mapLink(address) {
-  return `https://maps.google.com/?q=${encodeURIComponent(address)}`;
-}
-
 function renderTrip() {
-  const total = ESTIMATE.reduce((a, [, v]) => a + v, 0);
   const recap = tripFinal(view, store.scores)
     ? '<button class="card recap-link" data-action="tab" data-tab="recap">🏆 <b>Trip recap is ready</b> · standings, awards, best photos →</button>' : '';
   return `
@@ -564,19 +559,11 @@ function renderTrip() {
           <li><span class="ico">${it.icon}</span><div>
             ${it.time ? `<b>${esc(it.time)}</b> · ` : ''}${esc(it.text)}
             ${it.sub ? `<small>${esc(it.sub)}</small>` : ''}</div></li>`).join('')}
-          ${d.stay ? `<li><span class="ico">🛏️</span><div>Stay: <b>${esc(d.stay.name)}</b>
-            <a href="${mapLink(d.stay.address)}" target="_blank" rel="noopener"><small>${esc(d.stay.address)}</small></a></div></li>` : ''}
+          ${d.stay ? `<li><span class="ico">🛏️</span><div>Stay: <b>${esc(d.stay.name)}</b></div></li>` : ''}
         </ul>
       </article>`).join('')}
     <h2>Flights</h2>
-    <div class="card">${FLIGHTS.map((f) => `<div class="kv"><b>✈️ ${f.route}</b><span>${f.when}</span></div>`).join('')}
-      <div class="kv"><span class="muted">Roundtrip</span><span>$500</span></div></div>
-    <h2>Trip Crew</h2>
-    <div class="card">${PLAYERS.map((p) => `
-      <a class="kv crew" href="tel:${p.phone.replace(/\D/g, '')}"><b>${esc(p.name)}</b><span>${p.phone}</span></a>`).join('')}</div>
-    <h2>Trip Estimate</h2>
-    <div class="card">${ESTIMATE.map(([k, v]) => `<div class="kv"><span>${k}</span><span>$${v}</span></div>`).join('')}
-      <div class="kv total"><b>Total (estimated)</b><b>$${total.toLocaleString()}</b></div></div>`;
+    <div class="card">${FLIGHTS.map((f) => `<div class="kv"><b>✈️ ${f.route}</b><span>${f.when}</span></div>`).join('')}</div>`;
 }
 
 // ---------- Setup ----------

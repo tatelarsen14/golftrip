@@ -38,7 +38,7 @@ the result matters: splitting 2nd/3rd for Tuesday's matchups, or 1st for the tit
 - **Scores**: pick the round, your group and the hole, then tap + / − for each player. The first tap sets par (from the course scorecard). Max score on any hole is triple bogey (par + 3).
 - **Cards**: a full 18-hole scorecard for each course, marked like a paper card (circle = birdie, double circle = eagle or better, square = bogey, double square = double bogey or worse), plus a card for each match with the best ball scores that counted highlighted.
 - **Feed**: the Clubhouse. Post text, photos and videos (tagged to a hole if you like), react with 🔥 😂 💀 ⛳ 👏 and comment. Birdies, eagles, birdie streaks, 3+ holes won in a row and match results post themselves automatically.
-- **Trip**: the itinerary, tee times, lodging (tap to open maps), flights, crew phone numbers (tap to call) and the cost estimate.
+- **Trip**: the itinerary, tee times, where we're staying and flights.
 - **Setup** (only on the organizer's phone, see below): set team names, swap players between teams (tap one, then another), pick each day's matchups and singles pairings, and choose which days count. Every change saves for everyone instantly.
 
 Streaks: 🔥 next to a side that has won 2+ holes in a row in its match (🥶 for the other side), and 🐦🔥 next to a player with 2+ birdies in a row.
