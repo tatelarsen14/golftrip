@@ -259,7 +259,7 @@ function formatInfo(config) {
     <p><b>Winning a match:</b> the lower score wins the hole; same score halves it. Whoever wins more holes wins the match. It ends early once one side is up by more holes than are left (e.g. <i>Won 3&2</i> = 3 up with 2 to play).</p>
     <p><b>Points:</b> Win = 1 · Tie = ½ · Loss = 0. Each team can win 3 points a day (best ball + both singles), ${rounds.length * 3} over the trip. Most points at the end wins.</p>
     <p><b>Matchups:</b> ${unseeded.join(', ')}: groups rotate so every team plays every other team once.${seeded ? ` ${seeded.day.split(' ')[0]}: seeded from the standings, 1st v 2nd and 3rd v 4th (TBD until the earlier rounds are final).` : ''}</p>
-    <p><b>Max score:</b> triple bogey (par + 3) on every hole. Pick it up once you get there.</p>
+    <p><b>Max score:</b> triple bogey (par + 3) on every hole.</p>
     <p><b>Reading a match:</b> <i>2 UP thru 6</i> = leading by 2 holes after 6. <i>All square</i> = tied. <i>Dormie</i> = up by exactly the holes left, so the other side can only tie.</p>
     <p><b>Side game:</b> the Birdie Board counts everyone's birdies (eagles count as birdies).</p>
   </div>`;
