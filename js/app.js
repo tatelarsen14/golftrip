@@ -51,6 +51,9 @@ function marked(score, par) {
   return `<span class="mk ${scoreMark(score, par)}">${score}</span>`;
 }
 
+// Highest score allowed on a hole: triple bogey.
+const MAX_OVER_PAR = 3;
+
 const LEGEND = `<div class="legend">
   <span><span class="mk eagle">3</span> Eagle+</span>
   <span><span class="mk birdie">3</span> Birdie</span>
@@ -256,7 +259,7 @@ function formatInfo(config) {
     <p><b>Winning a match:</b> the lower score wins the hole; same score halves it. Whoever wins more holes wins the match. It ends early once one side is up by more holes than are left (e.g. <i>Won 3&2</i> = 3 up with 2 to play).</p>
     <p><b>Points:</b> Win = 1 · Tie = ½ · Loss = 0. Each team can win 3 points a day (best ball + both singles), ${rounds.length * 3} over the trip. Most points at the end wins.</p>
     <p><b>Matchups:</b> ${unseeded.join(', ')}: groups rotate so every team plays every other team once.${seeded ? ` ${seeded.day.split(' ')[0]}: seeded from the standings, 1st v 2nd and 3rd v 4th (TBD until the earlier rounds are final).` : ''}</p>
-    <p><b>Picked up?</b> Leave the score blank. In best ball your partner's score counts.</p>
+    <p><b>Max score:</b> triple bogey (par + 3) on every hole. Pick it up once you get there.</p>
     <p><b>Reading a match:</b> <i>2 UP thru 6</i> = leading by 2 holes after 6. <i>All square</i> = tied. <i>Dormie</i> = up by exactly the holes left, so the other side can only tie.</p>
     <p><b>Side game:</b> the Birdie Board counts everyone's birdies (eagles count as birdies).</p>
   </div>`;
@@ -413,7 +416,7 @@ function renderScores() {
       ${canScore ? `<div class="stepper">
         <button data-action="step" data-player="${p.id}" data-delta="-1" aria-label="Minus">−</button>
         <output class="${v ? '' : 'blank'}">${v ? marked(v, par) : '–'}</output>
-        <button data-action="step" data-player="${p.id}" data-delta="1" aria-label="Plus">+</button>
+        <button data-action="step" data-player="${p.id}" data-delta="1" aria-label="Plus" ${v && par && v >= par + MAX_OVER_PAR ? 'disabled' : ''}>+</button>
       </div>
       <button class="clear" data-action="clear" data-player="${p.id}" aria-label="Clear" ${v ? '' : 'disabled'}>✕</button>`
         : `<div class="stepper"><output class="${v ? '' : 'blank'}">${v ? marked(v, par) : '–'}</output></div>`}
@@ -439,7 +442,7 @@ function renderScores() {
       </div>
       ${rows}
       ${canScore ? '' : `<p class="spectator-note">👀 Spectator view: only players enter scores.${ui.me ? '' : ' <button class="link" data-action="change-me">Are you a player?</button>'}</p>`}
-      <p class="note">Everyone enters their own score. Picked up? Leave it blank${isFront ? ' — your partner\'s score counts' : ''}.</p>
+      <p class="note">Everyone enters their own score. Max score is triple bogey${par ? ` (${par + MAX_OVER_PAR} on this hole)` : ''}.</p>
       <div class="nav-row">
         <button class="btn ghost" data-action="hole" data-hole="${Math.max(1, hole - 1)}" ${hole === 1 ? 'disabled' : ''}>← Hole ${hole - 1 || ''}</button>
         <button class="btn" data-action="hole" data-hole="${Math.min(18, hole + 1)}" ${hole === 18 ? 'disabled' : ''}>Hole ${hole < 18 ? hole + 1 : ''} →</button>
@@ -527,6 +530,7 @@ function renderCards() {
     <h2>${esc(round.course)} · ${esc(round.day)}</h2>
     ${courseCard(config, round, roundScores)}
     ${LEGEND}
+    <p class="note">Max score on any hole is triple bogey (par + 3).</p>
     <h2>Match cards</h2>
     ${round.groups.map((g, gi) => `
       <h3>${groupTitle(round, gi)} · ${groupLabel(config, g)}</h3>
@@ -1031,7 +1035,9 @@ app.addEventListener('click', async (e) => {
       const cur = store.scores[round.id]?.[el.dataset.player]?.[ui.hole];
       const delta = Number(el.dataset.delta);
       // First tap on a blank score starts at par.
-      const next = cur ? Math.min(15, Math.max(1, cur + delta)) : (parFor(store.config, round.id, ui.hole) || 4);
+      // First tap starts at par; triple bogey is the max.
+      const par = parFor(store.config, round.id, ui.hole) || 4;
+      const next = cur ? Math.min(par + MAX_OVER_PAR, Math.max(1, cur + delta)) : par;
       store.setScore(round.id, el.dataset.player, ui.hole, next).catch(showError);
       return;
     }
