@@ -1,16 +1,24 @@
-import { createStore } from './store.js';
+import { createStore, MAX_VIDEO_MB } from './store.js';
 import { PLAYERS, TEAM_COLORS, TRIP, ITINERARY, FLIGHTS, ESTIMATE, MATCHUPS } from './data.js';
 import {
   buildMatches, computeMatch, computeStandings, birdieCounts, parFor, scoreMark, rankTeams, resolveConfig,
   TIEBREAKERS, FRONT_NINE, BACK_NINE, puttoffKey,
+  matchStreak, birdieStreak, highlights, longestBirdieRun, longestMatchRun, roundTotals,
 } from './scoring.js';
 
 const UI_KEY = 'golftrip:ui';
+const ADMIN_KEY = 'golftrip:admin';
+// Opening the app with #admin=<code> shows the Setup tab on that phone.
+const ADMIN_CODE = 'fore-8317';
 const app = document.getElementById('app');
 
 let store;
 let view; // store.config with seeded matchups filled in (or marked TBD)
 let pickedSlot = null; // Setup: first player tapped in a swap
+const drafts = {}; // unsent text in the composer and comment boxes, by field
+let pendingMedia = []; // photos/videos picked for the next post: { file, url, type }
+let posting = null; // { done, total, frac } while a post uploads
+let renderQueued = false;
 const ui = loadUI();
 
 // ---------- helpers ----------
@@ -118,14 +126,19 @@ function teamDot(idx) {
 function matchCard(match, res, { compact = false } = {}) {
   const label = match.type === 'bestball' ? 'Best Ball · Front 9' : 'Singles · Back 9';
   const thru = res.played === 0 ? '' : res.done ? 'Final' : `Thru ${res.played}`;
+  // 🔥 for winning 2+ holes in a row, 🥶 for the side on the wrong end of it.
+  const streak = !res.done ? matchStreak(res) : null;
   const row = (side, si) => {
     const lead = res.leader === si;
+    const badge = streak?.n >= 2
+      ? (streak.side === si ? `<span class="streak hot" title="Won ${streak.n} holes in a row">🔥${streak.n}</span>`
+        : '<span class="streak cold" title="Lost the last holes">🥶</span>') : '';
     const pts = res.points ? `<span class="pts">${fmtPts(res.points[si])} pt</span>` : '';
     let tag = '';
     if (lead) tag = `<span class="tag ${res.done ? 'win' : 'up'}">${esc(res.status)}</span>`;
     return `<div class="side ${lead ? 'lead' : ''} ${res.done && res.leader !== null && !lead ? 'lost' : ''}">
       ${teamDot(side.team)}
-      <span class="who">${esc(sideLabel(side))}</span>
+      <span class="who">${esc(sideLabel(side))}${badge}</span>
       ${tag}${pts}
     </div>`;
   };
@@ -135,6 +148,14 @@ function matchCard(match, res, { compact = false } = {}) {
     <header><span>${label}</span><span class="thru">${thru}</span></header>
     ${row(match.sides[0], 0)}${center}${row(match.sides[1], 1)}
   </article>`;
+}
+
+// True once every match of every counting round is final.
+function tripFinal(config, scores) {
+  const rounds = enabledRounds(config);
+  const matches = buildMatches(config);
+  return matches.length > 0 && !rounds.some((r) => r.pending)
+    && matches.every((m) => computeMatch(m, scores[m.roundId]).done);
 }
 
 // ---------- Tiebreakers ----------
@@ -277,7 +298,8 @@ function renderBoard() {
     champBanner = `<div class="champ" style="--team:${teamColor(champ.idx)}">
       <div class="champ-cup">🏆</div>
       <div><div class="champ-name">${esc(champ.name)} are the champions</div>
-      <div class="champ-sub">${champ.players.map(playerName).join(' & ')} · ${fmtPts(champ.points)} pts${champ.tiebreak ? ` · won on ${esc(champ.tiebreak.toLowerCase())}` : ''}</div></div>
+      <div class="champ-sub">${champ.players.map(playerName).join(' & ')} · ${fmtPts(champ.points)} pts${champ.tiebreak ? ` · won on ${esc(champ.tiebreak.toLowerCase())}` : ''}</div>
+      <button class="champ-link" data-action="tab" data-tab="recap">See the trip recap →</button></div>
     </div>`;
   } else if (champ) {
     champBanner = `<div class="champ">
@@ -363,12 +385,16 @@ function renderScores() {
       data-action="hole" data-hole="${h}">${h}</button>${h === 9 ? '<span class="turn"></span>' : ''}`;
   }).join('');
 
+  const bStreak = (pid) => {
+    const n = birdieStreak(config, round.id, roundScores[pid]);
+    return n >= 2 ? `<span class="streak hot" title="${n} birdies in a row">🐦🔥${n}</span>` : '';
+  };
   const rows = players.map((p) => {
     const v = roundScores[p.id]?.[hole];
     const total = Object.values(roundScores[p.id] || {}).reduce((a, b) => a + b, 0);
     return `<div class="entry-row">
       ${teamDot(p.team)}
-      <div class="entry-name">${esc(playerName(p.id))}<small>${total ? `${total} total` : ''}</small></div>
+      <div class="entry-name">${esc(playerName(p.id))}${bStreak(p.id)}<small>${total ? `${total} total` : ''}</small></div>
       <div class="stepper">
         <button data-action="step" data-player="${p.id}" data-delta="-1" aria-label="Minus">−</button>
         <output class="${v ? '' : 'blank'}">${v ? marked(v, par) : '–'}</output>
@@ -502,7 +528,10 @@ function mapLink(address) {
 
 function renderTrip() {
   const total = ESTIMATE.reduce((a, [, v]) => a + v, 0);
+  const recap = tripFinal(view, store.scores)
+    ? '<button class="card recap-link" data-action="tab" data-tab="recap">🏆 <b>Trip recap is ready</b> · standings, awards, best photos →</button>' : '';
   return `
+    ${recap}
     <div class="hero">
       <div class="hero-dates">${esc(TRIP.dates)}</div>
       <div class="hero-tag">${esc(TRIP.tagline)}</div>
@@ -533,18 +562,17 @@ function renderTrip() {
 
 function renderSetup() {
   const { config } = store;
-  const me = ui.me ? playerName(ui.me) : null;
-
   const matchupLabel = ([a, b]) => `${esc(config.teams[a].name)} v ${esc(config.teams[b].name)}`;
   const currentMatchup = (r) => MATCHUPS.findIndex(([g1]) => r.groups.some((g) => (
     g.teams.includes(g1[0]) && g.teams.includes(g1[1]))));
 
   return `
-    <h2>Who are you?</h2>
-    <div class="card">
-      <div class="name-grid">${PLAYERS.map((p) => `
-        <button class="${ui.me === p.id ? 'on' : ''}" data-action="me" data-id="${p.id}">${esc(p.name)}</button>`).join('')}</div>
-      <p class="note">${me ? `You're <b>${esc(me)}</b>. The Scores tab opens to your group.` : 'Tap your name so the Scores tab opens to your group.'} Saved on this phone.</p>
+    <div class="card admin-note">
+      <p>🔒 <b>Only you see this tab.</b> Setup is unlocked on this phone only; everyone else just sees the other tabs.</p>
+      <div class="nav-row">
+        <button class="btn ghost" data-action="tab" data-tab="recap">Preview trip recap</button>
+        <button class="btn ghost" data-action="lock-admin">Hide Setup here</button>
+      </div>
     </div>
 
     <h2>Teams</h2>
@@ -615,19 +643,315 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
 }
 
+// ---------- Clubhouse feed ----------
+
+const REACTIONS = ['🔥', '😂', '💀', '⛳', '👏'];
+
+function fmtAgo(ms) {
+  if (!ms) return '';
+  const mins = Math.floor((Date.now() - ms) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m`;
+  if (mins < 24 * 60) return `${Math.floor(mins / 60)}h`;
+  return new Date(ms).toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+}
+
+function avatar(pid, config) {
+  const t = teamOf(config, pid);
+  return `<span class="avatar" style="background:${t >= 0 ? teamColor(t) : 'var(--muted)'}">${esc(playerName(pid).slice(0, 1))}</span>`;
+}
+
+function roundName(config, roundId) {
+  return config.rounds.find((r) => r.id === roundId)?.course || '';
+}
+
+// Headline and detail for an automatic highlight.
+function highlightText(config, h) {
+  const who = esc(playerName(h.player));
+  const where = `#${h.hole} · ${esc(roundName(config, h.roundId))}`;
+  const side = (m, si) => esc(sideLabel(m.sides[si]));
+  switch (h.type) {
+    case 'eagle': return [`🦅 EAGLE! ${who} made ${h.score} on the par ${h.par}`, where];
+    case 'birdie': return [`🐦 ${who} birdied`, `${where} · ${h.score} on a par ${h.par}`];
+    case 'birdieRun': return [`🔥 ${who}: ${h.n} birdies in a row!`, `#${h.hole - h.n + 1}–${h.hole} · ${esc(roundName(config, h.roundId))}`];
+    case 'holeRun': return [`🔥 ${side(h.match, h.side)} won ${h.n} straight holes`, `vs ${side(h.match, 1 - h.side)} · thru #${h.hole}`];
+    case 'matchFinal': {
+      const kind = h.match.type === 'bestball' ? 'best ball' : 'singles';
+      if (h.res.leader === null) return [`🤝 ${side(h.match, 0)} and ${side(h.match, 1)} halve their ${kind} match`, esc(roundName(config, h.roundId))];
+      const w = h.res.leader;
+      return [`🏁 ${side(h.match, w)} beat ${side(h.match, 1 - w)} ${esc(h.res.status.replace('Won ', ''))}`, `${kind} · ${esc(roundName(config, h.roundId))}`];
+    }
+    default: return ['', ''];
+  }
+}
+
+function reactBar(itemId) {
+  const soc = store.social[itemId] || {};
+  const comments = soc.c || [];
+  const open = ui.openComments === itemId;
+  return `<div class="react-bar">
+    ${REACTIONS.map((e) => {
+      const who = soc.r?.[e] || [];
+      return `<button class="react ${ui.me && who.includes(ui.me) ? 'mine' : ''}" data-action="react" data-item="${itemId}" data-emoji="${e}"
+        title="${esc(who.map(playerName).join(', '))}">${e}${who.length ? `<span>${who.length}</span>` : ''}</button>`;
+    }).join('')}
+    <button class="react talk ${open ? 'mine' : ''}" data-action="toggle-comments" data-item="${itemId}">💬${comments.length ? `<span>${comments.length}</span>` : ''}</button>
+  </div>
+  ${comments.length ? `<div class="comments">${comments.map((c) => `
+    <div class="comment"><b>${esc(playerName(c.by))}</b> ${esc(c.text)} <span class="muted">${fmtAgo(c.at)}</span></div>`).join('')}</div>` : ''}
+  ${open ? `<div class="comment-box">
+    <input type="text" id="c-${itemId}" data-draft="c:${itemId}" value="${esc(drafts[`c:${itemId}`] || '')}" placeholder="Add a comment…" enterkeyhint="send">
+    <button class="btn small" data-action="comment" data-item="${itemId}">Send</button>
+  </div>` : ''}`;
+}
+
+function postCard(config, post) {
+  const itemId = `p-${post.id}`;
+  const tag = post.roundId ? `<span class="post-tag">${post.hole ? `#${post.hole} · ` : ''}${esc(roundName(config, post.roundId))}</span>` : '';
+  const media = (post.media || []).map((m) => (m.type === 'video'
+    ? `<video src="${esc(m.url)}" controls playsinline preload="metadata"></video>`
+    : `<img src="${esc(m.url)}" alt="" loading="lazy" data-action="zoom" data-src="${esc(m.url)}">`)).join('');
+  return `<article class="card post">
+    <header>${avatar(post.by, config)}<div><b>${esc(playerName(post.by))}</b> ${tag}<div class="muted">${fmtAgo(post.at)}</div></div>
+      ${post.by === ui.me ? `<button class="link del" data-action="del-post" data-id="${post.id}">Delete</button>` : ''}</header>
+    ${post.text ? `<p class="post-text">${esc(post.text)}</p>` : ''}
+    ${media ? `<div class="media n${Math.min(post.media.length, 3)}">${media}</div>` : ''}
+    ${reactBar(itemId)}
+  </article>`;
+}
+
+function highlightCard(config, h) {
+  const [title, sub] = highlightText(config, h);
+  return `<article class="card highlight ${h.type}">
+    <div class="hl-title">${title}</div>
+    <div class="muted">${sub}${h.at ? ` · ${fmtAgo(h.at)}` : ''}</div>
+    ${reactBar(h.id)}
+  </article>`;
+}
+
+function renderFeed() {
+  const config = view;
+  const round = currentRound();
+  const hl = highlights(config, store.scores, store.scoreTimes);
+  const filter = ui.feedFilter || 'all';
+  let items = [
+    ...store.posts.map((p) => ({ kind: 'post', at: p.at, p })),
+    ...hl.map((h) => ({ kind: 'hl', at: h.at, h })),
+  ];
+  if (filter === 'posts') items = items.filter((i) => i.kind === 'post');
+  if (filter === 'photos') items = items.filter((i) => i.kind === 'post' && i.p.media?.length);
+  if (filter === 'highlights') items = items.filter((i) => i.kind === 'hl');
+  items.sort((a, b) => b.at - a.at);
+  const limit = ui.feedLimit || 40;
+
+  const composer = !ui.me
+    ? `<div class="card composer"><button class="btn" data-action="change-me">Pick your name to post</button></div>`
+    : `<div class="card composer">
+      <textarea id="post-text" data-draft="post" rows="2" placeholder="What's happening, ${esc(playerName(ui.me))}?">${esc(drafts.post || '')}</textarea>
+      ${pendingMedia.length ? `<div class="previews">${pendingMedia.map((m, i) => `
+        <div class="pv">${m.type === 'video' ? `<video src="${m.url}" muted playsinline></video><span class="pv-kind">▶</span>` : `<img src="${m.url}" alt="">`}
+          <button data-action="unpick" data-i="${i}" aria-label="Remove">✕</button></div>`).join('')}</div>` : ''}
+      <div class="composer-row">
+        <label class="btn ghost small ${posting ? 'disabled' : ''}">📷 Photo/Video
+          <input type="file" id="media-input" accept="image/*,video/*" multiple hidden ${posting ? 'disabled' : ''}></label>
+        <select id="post-hole" data-draft="hole" aria-label="Tag a hole">
+          <option value="">${round ? `Tag a hole (${esc(round.course)})` : 'No tag'}</option>
+          ${round ? [...FRONT_NINE, ...BACK_NINE].map((h) => `<option value="${h}" ${String(drafts.hole) === String(h) ? 'selected' : ''}>Hole ${h}</option>`).join('') : ''}
+        </select>
+        <button class="btn small" data-action="post" ${posting || (!drafts.post?.trim() && !pendingMedia.length) ? 'disabled' : ''}>Post</button>
+      </div>
+      ${posting ? `<div class="progress"><div style="width:${Math.round(((posting.done + posting.frac) / posting.total) * 100)}%"></div>
+        <span>Uploading ${posting.done + 1} of ${posting.total}…</span></div>` : ''}
+    </div>`;
+
+  return `
+    ${composer}
+    <div class="chips feed-filter">${[['all', 'All'], ['posts', 'Posts'], ['photos', 'Photos'], ['highlights', 'Highlights']].map(([id, label]) => `
+      <button class="chip ${filter === id ? 'on' : ''}" data-action="feed-filter" data-id="${id}"><span>${label}</span></button>`).join('')}</div>
+    ${items.length ? items.slice(0, limit).map((i) => (i.kind === 'post' ? postCard(config, i.p) : highlightCard(config, i.h))).join('')
+      : `<p class="empty">${filter === 'highlights' ? 'Birdies, streaks and match results show up here automatically.' : 'Nothing yet. Post the first photo!'}</p>`}
+    ${items.length > limit ? '<button class="btn ghost more" data-action="feed-more">Show more</button>' : ''}`;
+}
+
+async function submitPost() {
+  const text = (drafts.post || '').trim();
+  if (!ui.me || (!text && !pendingMedia.length) || posting) return;
+  const files = pendingMedia;
+  posting = { done: 0, total: Math.max(files.length, 1), frac: 0 };
+  render();
+  try {
+    const media = [];
+    for (const m of files) {
+      media.push(await store.uploadMedia(m.file, (frac) => { posting.frac = frac; render(); }));
+      posting.done++;
+      posting.frac = 0;
+    }
+    const round = currentRound();
+    const hole = Number(drafts.hole) || null;
+    await store.addPost({ by: ui.me, text, media, roundId: round?.id || null, hole });
+    files.forEach((m) => URL.revokeObjectURL(m.url));
+    pendingMedia = [];
+    drafts.post = '';
+    drafts.hole = '';
+    toast('Posted ✓');
+  } catch (err) {
+    console.error(err);
+    const code = err.code || '';
+    alert(code.startsWith('storage/') || /storage/i.test(err.message)
+      ? "Couldn't upload. Photo and video uploads may not be turned on yet (Firebase Storage). Your post is still here to try again."
+      : `Couldn't post: ${err.message || err}`);
+  } finally {
+    posting = null;
+    render();
+  }
+}
+
+function openLightbox(src) {
+  const el = document.createElement('div');
+  el.className = 'lightbox';
+  el.innerHTML = `<img src="${esc(src)}" alt="">`;
+  el.addEventListener('click', () => el.remove());
+  document.body.appendChild(el);
+}
+
+// ---------- Trip recap ----------
+
+function renderRecap() {
+  const config = view;
+  const { scores } = store;
+  const final = tripFinal(config, scores);
+  const rounds = enabledRounds(config);
+  const allIds = rounds.map((r) => r.id);
+  const { ranked } = rankTeams(config, scores, allIds, 'final');
+  const standings = computeStandings(config, scores);
+  const birdies = birdieCounts(config, scores);
+  const pids = config.teams.flatMap((t) => t.players);
+  const reactCount = (id) => Object.values(store.social[id]?.r || {}).reduce((a, l) => a + l.length, 0);
+
+  // Awards, worked out from the scores and the feed.
+  const top = (list, val) => {
+    const best = Math.max(...list.map(val));
+    return best > 0 ? { best, who: list.filter((x) => val(x) === best) } : null;
+  };
+  const mvp = top(pids, (p) => standings.players[p]?.points || 0);
+  const birdieKing = top(pids, (p) => birdies[p]?.birdies || 0);
+  const rounds18 = pids.flatMap((p) => roundTotals(config, scores, p).filter((r) => r.holes === 18).map((r) => ({ ...r, p })));
+  const lowRound = rounds18.sort((a, b) => a.gross - b.gross)[0];
+  const hottest = top(pids, (p) => longestBirdieRun(config, scores, p));
+  let runBest = null;
+  for (const m of buildMatches(config)) {
+    const run = longestMatchRun(computeMatch(m, scores[m.roundId]));
+    if (run && (!runBest || run.n > runBest.n)) runBest = { ...run, m };
+  }
+  const posts = store.posts;
+  const crowd = [...posts].sort((a, b) => reactCount(`p-${b.id}`) - reactCount(`p-${a.id}`))[0];
+  const paparazzi = top(pids, (p) => posts.filter((x) => x.by === p).reduce((a, x) => a + (x.media?.length || 0), 0));
+  const names = (list) => list.map((p) => esc(playerName(p))).join(' & ');
+
+  const awards = [
+    mvp && ['🎖️', 'MVP', names(mvp.who), `${fmtPts(mvp.best)} match points`],
+    birdieKing && ['🐦', 'Birdie King', names(birdieKing.who), `${birdieKing.best} birdies`],
+    lowRound && ['⛳', 'Low Round', esc(playerName(lowRound.p)), `${lowRound.gross} (${lowRound.gross - lowRound.par >= 0 ? '+' : ''}${lowRound.gross - lowRound.par}) at ${esc(lowRound.course)}`],
+    hottest?.best >= 2 && ['🔥', 'Hottest Hand', names(hottest.who), `${hottest.best} birdies in a row`],
+    runBest?.n >= 3 && ['💪', 'Longest Run', esc(sideLabel(runBest.m.sides[runBest.side])), `won ${runBest.n} straight holes`],
+    crowd && reactCount(`p-${crowd.id}`) > 0 && ['💬', 'Crowd Favorite', esc(playerName(crowd.by)), `${reactCount(`p-${crowd.id}`)} reactions`],
+    paparazzi && ['📸', 'Paparazzi', names(paparazzi.who), `${paparazzi.best} photos & videos`],
+  ].filter(Boolean);
+
+  const photos = posts.flatMap((p) => (p.media || []).filter((m) => m.type === 'image').map((m) => ({ ...m, score: reactCount(`p-${p.id}`), by: p.by })))
+    .sort((a, b) => b.score - a.score).slice(0, 9);
+  const champ = ranked[0];
+
+  const playerCards = pids.map((p) => ({ p, s: standings.players[p] }))
+    .sort((a, b) => b.s.points - a.s.points)
+    .map(({ p, s }) => {
+      const totals = roundTotals(config, scores, p).filter((r) => r.holes);
+      const best = totals.filter((r) => r.holes === 18).sort((a, b) => a.gross - b.gross)[0];
+      return `<div class="card recap-player" style="--team:${teamColor(s.team)}">
+        <div class="rp-head">${avatar(p, config)}<b>${esc(playerName(p))}</b><span class="muted">${esc(config.teams[s.team].name)}</span>
+          <span class="rp-pts">${fmtPts(s.points)} pts</span></div>
+        <div class="rp-stats"><span>${s.w}-${s.l}-${s.h}</span><span>🐦 ${birdies[p]?.birdies || 0}</span>
+          ${best ? `<span>Best ${best.gross} (${esc(best.day.split(' ')[0])})</span>` : ''}</div>
+        <div class="rp-rounds">${totals.map((r) => `<span>${esc(r.day.split(' ')[0])} <b>${r.gross}</b>${r.holes < 18 ? `<small> thru ${r.holes}</small>` : ''}</span>`).join('')}</div>
+      </div>`;
+    }).join('');
+
+  const days = rounds.filter((r) => !r.pending).map((r) => {
+    const day = rankTeams(config, scores, [r.id]).ranked;
+    return `<div class="kv"><span><b>${esc(r.day.split(' ')[0])}</b> ${esc(r.course)}</span>
+      <span class="day-pts">${day.map((t) => `${teamDot(t.idx)}${fmtPts(t.points)}`).join(' ')}</span></div>`;
+  }).join('');
+
+  return `
+    ${final ? '' : '<div class="card tbd"><div class="tbd-title">Preview</div><p>The recap fills in as the trip goes and is final after the last match.</p></div>'}
+    <div class="recap-hero">
+      <div class="rh-kicker">Buckle Up · ${esc(TRIP.dates)}</div>
+      <div class="rh-title">Trip Recap</div>
+      ${champ && final && !champ.unresolved ? `<div class="rh-champ">🏆 ${esc(champ.name)} · ${champ.players.map(playerName).join(' & ')}</div>` : ''}
+      <button class="btn ghost small" data-action="share-recap">Share</button>
+    </div>
+    <h2>Final standings</h2>
+    <div class="card teams">${ranked.map((t, i) => `
+      <div class="team-row ${final && i === 0 && !t.unresolved ? 'winner' : ''}" style="--team:${teamColor(t.idx)}">
+        <div class="rank">${final && i === 0 && !t.unresolved ? '🏆' : t.rank}</div>
+        <div class="team-info"><div class="team-name">${esc(t.name)}</div>
+          <div class="team-players">${t.players.map(playerName).join(' & ')}</div></div>
+        <div class="big-pts">${fmtPts(t.points)}</div></div>`).join('')}</div>
+    <h2>Awards</h2>
+    <div class="awards">${awards.length ? awards.map(([icon, title, who, why]) => `
+      <div class="card award"><div class="aw-icon">${icon}</div><div class="aw-title">${title}</div>
+        <div class="aw-who">${who}</div><div class="muted">${why}</div></div>`).join('') : '<p class="empty">Awards show up once scores are in.</p>'}</div>
+    <h2>Day by day</h2>
+    <div class="card">${days || '<p class="empty">No rounds played yet.</p>'}</div>
+    ${photos.length ? `<h2>Best photos</h2><div class="photo-grid">${photos.map((m) => `
+      <img src="${esc(m.url)}" alt="" loading="lazy" data-action="zoom" data-src="${esc(m.url)}">`).join('')}</div>` : ''}
+    <h2>Players</h2>
+    ${playerCards}`;
+}
+
+// ---------- Name picker ----------
+
+function namePicker() {
+  return `<div class="modal"><div class="modal-card">
+    <div class="tbd-title">Who are you?</div>
+    <p class="muted">Tap your name. Your group opens first on the Scores tab, and it's how your posts are signed. Saved on this phone.</p>
+    <div class="name-grid">${PLAYERS.map((p) => `
+      <button class="${ui.me === p.id ? 'on' : ''}" data-action="set-me" data-id="${p.id}">${esc(p.name)}</button>`).join('')}</div>
+    <button class="link" data-action="close-picker">${ui.me ? 'Cancel' : 'Just watching'}</button>
+  </div></div>`;
+}
+
 // ---------- shell ----------
 
 const TABS = [
   ['board', '🏆', 'Leaderboard', renderBoard],
   ['scores', '✏️', 'Scores', renderScores],
   ['cards', '📋', 'Cards', renderCards],
+  ['feed', '💬', 'Feed', renderFeed],
   ['trip', '🗺️', 'Trip', renderTrip],
   ['setup', '⚙️', 'Setup', renderSetup],
 ];
+// Reached from the champion banner, the Trip tab or a #recap link.
+const HIDDEN_TABS = [['recap', '', 'Recap', renderRecap]];
+
+function isAdmin() {
+  try { return localStorage.getItem(ADMIN_KEY) === '1'; } catch { return false; }
+}
 
 function render() {
+  // Don't yank a video someone is watching; re-render when it stops.
+  if ([...app.querySelectorAll('video')].some((v) => !v.paused && !v.ended)) {
+    renderQueued = true;
+    return;
+  }
+  renderQueued = false;
   view = resolveConfig(store.config, store.scores);
-  const tab = TABS.find((t) => t[0] === ui.tab) || TABS[0];
+  const tabs = TABS.filter(([id]) => id !== 'setup' || isAdmin());
+  const tab = [...tabs, ...HIDDEN_TABS].find((t) => t[0] === ui.tab) || tabs[0];
+  // Keep the cursor in whatever box the person is typing in.
+  const active = document.activeElement;
+  const focusId = app.contains(active) ? active.id : '';
+  const sel = focusId && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
   const sync = store.mode === 'firebase'
     ? (store.online ? '<span class="sync on">● Live</span>' : '<span class="sync off">● Offline — will sync</span>')
     : '<span class="sync local">● This device only</span>';
@@ -636,16 +960,27 @@ function render() {
   app.dataset.tab = tab[0];
   app.innerHTML = `
     <header class="top">
-      <div><h1>${esc(TRIP.title)}</h1><div class="sub">Buckle Up${ui.me ? ` · ${esc(playerName(ui.me))}` : ' · Match Play'}</div></div>
+      <div><h1>${esc(TRIP.title)}</h1><button class="sub" data-action="change-me">Buckle Up · ${ui.me ? `${esc(playerName(ui.me))} ▾` : 'Pick your name ▾'}</button></div>
       ${sync}
     </header>
     <main>${tab[3]()}</main>
-    <nav class="tabs">${TABS.map(([id, icon, label]) => `
+    <nav class="tabs" style="--n:${tabs.length}">${tabs.map(([id, icon, label]) => `
       <button class="${id === tab[0] ? 'on' : ''}" data-action="tab" data-tab="${id}">
-        <span>${icon}</span>${label}</button>`).join('')}</nav>`;
+        <span>${icon}</span>${label}</button>`).join('')}</nav>
+    ${ui.pickingMe || (!ui.me && !ui.watching) ? namePicker() : ''}`;
   if (keepScroll) window.scrollTo(0, scrollY);
+  if (focusId) {
+    const el = document.getElementById(focusId);
+    if (el) {
+      el.focus({ preventScroll: true });
+      if (sel && el.setSelectionRange) try { el.setSelectionRange(...sel); } catch {}
+    }
+  }
   saveUI();
 }
+
+app.addEventListener('pause', () => { if (renderQueued) render(); }, true);
+app.addEventListener('ended', () => { if (renderQueued) render(); }, true);
 
 app.addEventListener('click', async (e) => {
   const el = e.target.closest('[data-action]');
@@ -681,10 +1016,67 @@ app.addEventListener('click', async (e) => {
     case 'clear':
       store.setScore(round.id, el.dataset.player, ui.hole, null).catch(showError);
       return;
-    case 'me':
-      ui.me = ui.me === el.dataset.id ? null : el.dataset.id;
+    case 'set-me':
+      ui.me = el.dataset.id;
+      ui.pickingMe = false;
       ui.group = null;
       break;
+    case 'change-me':
+      ui.pickingMe = true;
+      break;
+    case 'close-picker':
+      ui.pickingMe = false;
+      if (!ui.me) ui.watching = true;
+      break;
+    case 'lock-admin':
+      try { localStorage.removeItem(ADMIN_KEY); } catch {}
+      ui.tab = 'board';
+      toast('Setup hidden on this phone');
+      break;
+    case 'feed-filter':
+      ui.feedFilter = el.dataset.id;
+      ui.feedLimit = 40;
+      break;
+    case 'feed-more':
+      ui.feedLimit = (ui.feedLimit || 40) + 40;
+      break;
+    case 'react':
+      if (!ui.me) { ui.pickingMe = true; break; }
+      store.toggleReaction(el.dataset.item, el.dataset.emoji, ui.me).catch(showError);
+      return;
+    case 'toggle-comments':
+      ui.openComments = ui.openComments === el.dataset.item ? null : el.dataset.item;
+      break;
+    case 'comment': {
+      if (!ui.me) { ui.pickingMe = true; break; }
+      const key = `c:${el.dataset.item}`;
+      const text = (drafts[key] || '').trim();
+      if (!text) return;
+      drafts[key] = '';
+      store.addComment(el.dataset.item, { by: ui.me, text }).catch(showError);
+      break;
+    }
+    case 'post':
+      submitPost();
+      return;
+    case 'unpick': {
+      const [m] = pendingMedia.splice(Number(el.dataset.i), 1);
+      if (m) URL.revokeObjectURL(m.url);
+      break;
+    }
+    case 'del-post':
+      if (!confirm('Delete this post?')) return;
+      store.deletePost(el.dataset.id).catch(showError);
+      return;
+    case 'zoom':
+      openLightbox(el.dataset.src);
+      return;
+    case 'share-recap': {
+      const url = `${location.origin}${location.pathname}#recap`;
+      if (navigator.share) navigator.share({ title: 'Buckle Up · Trip Recap', url }).catch(() => {});
+      else navigator.clipboard?.writeText(url).then(() => toast('Link copied ✓'));
+      return;
+    }
     case 'pick-player': {
       const slot = { team: Number(el.dataset.team), slot: Number(el.dataset.slot) };
       if (!pickedSlot || (pickedSlot.team === slot.team && pickedSlot.slot === slot.slot)) {
@@ -735,8 +1127,42 @@ app.addEventListener('click', async (e) => {
   render();
 });
 
+// Remember what's typed so live updates (which redraw the page) don't wipe it.
+app.addEventListener('input', (e) => {
+  const key = e.target.dataset.draft;
+  if (!key) return;
+  const hadText = !!drafts[key]?.trim();
+  drafts[key] = e.target.value;
+  // The Post button enables once there's something to post.
+  if (key === 'post' && hadText !== !!drafts[key].trim()) render();
+});
+
+app.addEventListener('keydown', (e) => {
+  const key = e.target.dataset.draft;
+  if (e.key === 'Enter' && key?.startsWith('c:')) {
+    e.preventDefault();
+    app.querySelector(`[data-action="comment"][data-item="${key.slice(2)}"]`)?.click();
+  }
+});
+
 app.addEventListener('change', (e) => {
   const el = e.target;
+  if (el.id === 'media-input') {
+    for (const file of el.files) {
+      if (!/^(image|video)\//.test(file.type)) continue;
+      if (file.type.startsWith('video/') && file.size > MAX_VIDEO_MB * 1024 * 1024) {
+        alert(`${file.name} is over ${MAX_VIDEO_MB} MB. Try a shorter clip.`);
+        continue;
+      }
+      pendingMedia.push({ file, url: URL.createObjectURL(file), type: file.type.startsWith('video/') ? 'video' : 'image' });
+    }
+    render();
+    return;
+  }
+  if (el.dataset.draft) {
+    drafts[el.dataset.draft] = el.value;
+    return;
+  }
   const { edit, team, round } = el.dataset;
   if (!edit) return;
   saveSetup((c) => {
@@ -751,7 +1177,21 @@ function showError(err) {
   alert(`Couldn't save: ${err.message || err}`);
 }
 
+// #admin=<code> unlocks Setup on this phone; #recap opens the recap.
+function readHash() {
+  if (location.hash === `#admin=${ADMIN_CODE}`) {
+    try { localStorage.setItem(ADMIN_KEY, '1'); } catch {}
+    ui.tab = 'setup';
+    history.replaceState(null, '', location.pathname + location.search);
+    setTimeout(() => toast('Setup unlocked on this phone'), 300);
+  } else if (location.hash === '#recap') {
+    ui.tab = 'recap';
+  }
+}
+
 (async () => {
+  readHash();
+  window.addEventListener('hashchange', () => { readHash(); render(); });
   store = await createStore(() => render());
   render();
 })();

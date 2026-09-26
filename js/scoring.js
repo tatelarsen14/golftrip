@@ -312,3 +312,149 @@ export function resolveConfig(config, scores) {
   });
   return resolved;
 }
+
+// ---------- Streaks, highlights and recap stats ----------
+
+const isBirdieOrBetter = (score, par) => ['birdie', 'eagle'].includes(scoreMark(score, par));
+
+// Holes won in a row by one side, counting back from the latest hole played
+// in the match. Returns { side, n } or null (a halved hole ends a run).
+export function matchStreak(res) {
+  const played = res.holes.filter((h) => h.winner !== null);
+  let side = null;
+  let n = 0;
+  for (let i = played.length - 1; i >= 0; i--) {
+    const w = played[i].winner;
+    if (w === 'halve' || (side !== null && w !== side)) break;
+    side = w;
+    n++;
+  }
+  return n ? { side, n } : null;
+}
+
+// Longest run of holes won in a row by either side at any point in a match.
+export function longestMatchRun(res) {
+  let best = null;
+  let side = null;
+  let n = 0;
+  for (const h of res.holes) {
+    if (h.winner === null) continue;
+    if (h.winner === 'halve') { side = null; n = 0; continue; }
+    n = h.winner === side ? n + 1 : 1;
+    side = h.winner;
+    if (!best || n > best.n) best = { side, n };
+  }
+  return best;
+}
+
+// Birdies (or better) in a row ending at the player's latest scored hole.
+export function birdieStreak(config, roundId, playerScores) {
+  const holes = Object.keys(playerScores || {}).map(Number).sort((a, b) => a - b);
+  let n = 0;
+  for (let i = holes.length - 1; i >= 0; i--) {
+    if (i < holes.length - 1 && holes[i + 1] !== holes[i] + 1) break;
+    if (!isBirdieOrBetter(playerScores[holes[i]], parFor(config, roundId, holes[i]))) break;
+    n++;
+  }
+  return n;
+}
+
+// Longest birdie-or-better run for a player across the enabled rounds.
+export function longestBirdieRun(config, scores, playerId) {
+  let best = 0;
+  for (const round of config.rounds) {
+    if (!round.enabled) continue;
+    const sc = scores[round.id]?.[playerId] || {};
+    let n = 0;
+    for (let h = 1; h <= 18; h++) {
+      n = isBirdieOrBetter(sc[h], parFor(config, round.id, h)) ? n + 1 : 0;
+      best = Math.max(best, n);
+    }
+  }
+  return best;
+}
+
+// Automatic feed items worked out from the scores, so no phone has to post
+// them and they fix themselves if a score is corrected. `times` gives when
+// each hole was scored; every item has a stable id for reactions/comments.
+export function highlights(config, scores, times) {
+  const items = [];
+  const at = (roundId, players, hole) => Math.max(0, ...players.map((p) => times?.[roundId]?.[p]?.[hole] || 0));
+
+  for (const round of config.rounds) {
+    if (!round.enabled) continue;
+    for (const team of config.teams) {
+      for (const pid of team.players) {
+        const sc = scores[round.id]?.[pid] || {};
+        // One item per birdie, plus one per run of 2+ that grows in place
+        // (keyed by the run's first hole, so reactions stay with it).
+        let start = 0;
+        const endRun = (last) => {
+          const n = last - start + 1;
+          if (start && n >= 2) {
+            items.push({
+              id: `hl-${round.id}-${pid}-${start}-run`, type: 'birdieRun', n, player: pid,
+              roundId: round.id, hole: last, at: at(round.id, [pid], last),
+            });
+          }
+          start = 0;
+        };
+        for (let h = 1; h <= 18; h++) {
+          const par = parFor(config, round.id, h);
+          if (!isBirdieOrBetter(sc[h], par)) { endRun(h - 1); continue; }
+          if (!start) start = h;
+          const type = scoreMark(sc[h], par);
+          items.push({
+            id: `hl-${round.id}-${pid}-${h}-${type}`, type, player: pid, score: sc[h], par,
+            roundId: round.id, hole: h, at: at(round.id, [pid], h),
+          });
+        }
+        endRun(18);
+      }
+    }
+  }
+
+  for (const match of buildMatches(config)) {
+    const res = computeMatch(match, scores[match.roundId]);
+    const everyone = match.sides.flatMap((s) => s.players);
+    // One item per run of 3+ holes won in a row, growing in place.
+    let side = null;
+    let run = [];
+    const endRun = () => {
+      if (run.length >= 3) {
+        const last = run[run.length - 1];
+        items.push({
+          id: `hl-${match.id}-${run[0]}-run`, type: 'holeRun', match, side, n: run.length,
+          roundId: match.roundId, hole: last, at: at(match.roundId, everyone, last),
+        });
+      }
+      run = [];
+    };
+    for (const h of res.holes) {
+      if (h.winner === null) continue;
+      if (h.winner !== side || h.winner === 'halve') endRun();
+      side = h.winner === 'halve' ? null : h.winner;
+      if (side !== null) run.push(h.hole);
+    }
+    endRun();
+    if (res.done) {
+      const last = [...res.holes].reverse().find((h) => h.winner !== null);
+      items.push({
+        id: `hl-${match.id}-final`, type: 'matchFinal', match, res,
+        roundId: match.roundId, hole: last.hole, at: at(match.roundId, everyone, last.hole),
+      });
+    }
+  }
+
+  return items.sort((a, b) => b.at - a.at);
+}
+
+// Gross totals for each player's complete 18-hole rounds.
+export function roundTotals(config, scores, playerId) {
+  return config.rounds.filter((r) => r.enabled).map((r) => {
+    const sc = scores[r.id]?.[playerId] || {};
+    const holes = Object.values(sc).filter(isScore);
+    const par = Object.values(config.pars?.[r.id] || {}).reduce((a, b) => a + b, 0);
+    return { roundId: r.id, day: r.day, course: r.course, gross: holes.reduce((a, b) => a + b, 0), holes: holes.length, par };
+  });
+}

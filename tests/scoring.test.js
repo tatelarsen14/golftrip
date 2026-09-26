@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildMatches, computeMatch, computeStandings, sideScore, scoreMark, birdieCounts, rankTeams, resolveConfig,
+  matchStreak, birdieStreak, highlights, longestBirdieRun, longestMatchRun,
 } from '../js/scoring.js';
 import { DEFAULT_CONFIG } from '../js/data.js';
 
@@ -235,4 +236,47 @@ test('a 2nd/3rd tie that needs a putt-off keeps Tuesday TBD; a 1st/2nd one does 
   tue = resolveConfig(c, even).rounds.find((r) => r.id === 'tue');
   assert.equal(tue.pending, undefined);
   assert.deepEqual(tue.groups.map((g) => g.teams), [[3, 2], [0, 1]]);
+});
+
+test('match streak counts holes won in a row from the latest hole', () => {
+  const m = buildMatches(cfg).find((x) => x.id === 'sat-g1-s1'); // Tate v Sam, back 9
+  // 10 Tate, 11 halve, 12 Sam, 13 Sam
+  let r = computeMatch(m, { tate: holes([3, 4, 5, 5], 10), sam: holes([4, 4, 4, 4], 10) });
+  assert.deepEqual(matchStreak(r), { side: 1, n: 2 });
+  r = computeMatch(m, { tate: holes([3, 4], 10), sam: holes([4, 4], 10) }); // ends on a halve
+  assert.equal(matchStreak(r), null);
+  r = computeMatch(m, { tate: holes([3, 3, 3, 4], 10), sam: holes([4, 4, 4, 4], 10) });
+  assert.deepEqual(longestMatchRun(r), { side: 0, n: 3 });
+});
+
+test('birdie streak needs consecutive holes ending at the latest one', () => {
+  // Circling Raven pars: 1=5, 2=4, 3=3, 4=4
+  assert.equal(birdieStreak(cfg, 'sat', { 1: 4, 2: 3 }), 2);
+  assert.equal(birdieStreak(cfg, 'sat', { 1: 4, 2: 3, 3: 3 }), 0); // par on 3 ends it
+  assert.equal(birdieStreak(cfg, 'sat', { 1: 4, 3: 2 }), 1); // hole 2 missing
+  assert.equal(longestBirdieRun(cfg, { sat: { tate: { 1: 4, 2: 3, 3: 2, 4: 4 } } }, 'tate'), 3);
+});
+
+test('highlights: birdies, eagles, birdie runs, 3-hole runs and match results', () => {
+  const nine = (v, start) => holes(Array(9).fill(v), start);
+  const scores = { sat: {
+    // Tate: birdie on 1 and 2 (pars 5, 4), eagle on 5 (par 5)
+    tate: { ...holes([4, 3, 3, 4, 3, 4, 3, 4, 4], 1), ...nine(3, 10) },
+    garrett: { ...nine(5, 1), ...nine(5, 10) },
+    sam: { ...nine(5, 1), ...nine(4, 10) },
+    jonah: { ...nine(5, 1), ...nine(4, 10) },
+  } };
+  const times = { sat: { tate: { 1: 1000, 2: 2000, 5: 5000 } } };
+  const hl = highlights(cfg, scores, times);
+  const ids = hl.map((h) => h.id);
+  assert.ok(ids.includes('hl-sat-tate-1-birdie'));
+  assert.ok(ids.includes('hl-sat-tate-1-run')); // birdies on 1-2, keyed by the first hole
+  assert.equal(hl.find((h) => h.id === 'hl-sat-tate-1-run').n, 2);
+  assert.ok(ids.includes('hl-sat-tate-5-eagle'));
+  assert.ok(ids.includes('hl-sat-g1-bb-final'));
+  // Tate wins every back-nine hole: one growing item, not one per hole.
+  const runs = hl.filter((h) => h.type === 'holeRun' && h.match.id === 'sat-g1-s1');
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].n, 5); // closed out 5&4 after 5 holes
+  assert.equal(hl[0].id, 'hl-sat-tate-5-eagle'); // newest first
 });

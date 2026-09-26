@@ -37,8 +37,40 @@ the result matters: splitting 2nd/3rd for Tuesday's matchups, or 1st for the tit
 - **Leaderboard**: team standings (with a step-by-step tiebreaker card when teams are tied after Monday or Tuesday, and the winning team highlighted with a champion banner once Tuesday is final), live status of every match ("2 UP thru 6", "Won 3&2", "Dormie"), individual W-L-T and points, and the Birdie Board (birdies per player, eagles count as birdies).
 - **Scores**: pick the round, your group and the hole, then tap + / − for each player. The first tap sets par (from the course scorecard). Leave a score blank if you picked up.
 - **Cards**: a full 18-hole scorecard for each course, marked like a paper card (circle = birdie, double circle = eagle or better, square = bogey, double square = double bogey or worse), plus a card for each match with the best ball scores that counted highlighted.
+- **Feed**: the Clubhouse. Post text, photos and videos (tagged to a hole if you like), react with 🔥 😂 💀 ⛳ 👏 and comment. Birdies, eagles, birdie streaks, 3+ holes won in a row and match results post themselves automatically.
 - **Trip**: the itinerary, tee times, lodging (tap to open maps), flights, crew phone numbers (tap to call) and the cost estimate.
-- **Setup**: tap your name, then set team names, swap players between teams (tap one, then another), pick each day's matchups and singles pairings, and choose which days count. Every change saves for everyone instantly.
+- **Setup** (only on the organizer's phone, see below): set team names, swap players between teams (tap one, then another), pick each day's matchups and singles pairings, and choose which days count. Every change saves for everyone instantly.
+
+Streaks: 🔥 next to a side that has won 2+ holes in a row in its match (🥶 for the other side), and 🐦🔥 next to a player with 2+ birdies in a row.
+
+**Trip recap**: once the last match is final, the champion banner and the Trip tab link to a recap page with final standings, awards (MVP, Birdie King, Low Round, Hottest Hand, Longest Run, Crowd Favorite, Paparazzi), day-by-day results, the best photos and every player's rounds. Share it with a `#recap` link.
+
+**Names**: the first time someone opens the app it asks who they are (tap the name in the header to change it).
+
+**Setup is hidden** for everyone except phones that opened the admin link once: `<site>/#admin=fore-8317`. "Hide Setup here" in Setup locks it again. This hides the tab; it isn't a password on the database.
+
+## Photos and videos (Firebase Storage)
+
+Uploads need Firebase Storage, which requires the pay-as-you-go (Blaze) plan:
+
+1. Firebase console → **Upgrade** (bottom of the left menu) → **Blaze**, and add a billing account. Set a budget alert (e.g. $5) when it offers.
+2. **Build → Storage → Get started** → production mode → a US location such as `us-west1` (the US regions include a free allowance).
+3. **Storage → Rules**, paste and **Publish**:
+   ```
+   rules_version = '2';
+   service firebase.storage {
+     match /b/{bucket}/o {
+       match /trips/{tripId}/{allPaths=**} {
+         allow read: if true;
+         allow create: if request.resource.size < 200 * 1024 * 1024
+           && (request.resource.contentType.matches('image/.*')
+               || request.resource.contentType.matches('video/.*'));
+       }
+     }
+   }
+   ```
+
+Photos are shrunk to about 1600px before upload; videos can be up to 200 MB.
 
 ## Run it locally
 
