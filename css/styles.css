@@ -318,9 +318,19 @@ select, input[type=text] {
   display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 6px;
   border-radius: 10px; border: 1px solid var(--gold); background: var(--paper); font-weight: 700;
 }
-.tb-rules summary { cursor: pointer; font-weight: 600; color: var(--forest-2); }
-.tb-rules ol { margin: 4px 0; padding-left: 20px; }
-.tb-rules p { margin: 4px 0; }
+.info-toggles { display: flex; gap: 8px; margin: 8px 0 0; }
+.info-btn {
+  border: 1px solid var(--line); background: var(--paper); border-radius: 99px; padding: 6px 14px;
+  font-size: 13px; font-weight: 600; color: var(--forest-2);
+}
+.info-btn.on { background: var(--forest); border-color: var(--forest); color: var(--cream); }
+.info-panel {
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 10px 14px; margin-top: 8px; font-size: 13px; line-height: 1.45;
+}
+.info-panel p { margin: 6px 0; }
+.info-panel ul, .info-panel ol { margin: 4px 0; padding-left: 20px; }
+.info-panel li { margin: 3px 0; }
 .champ {
   display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 14px 16px; border-radius: var(--radius);
   background: linear-gradient(135deg, var(--forest), var(--forest-2)); color: var(--cream);

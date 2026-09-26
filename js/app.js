@@ -241,6 +241,27 @@ function tiePanel(config, title, sub, ties, stage, ranked) {
   </div>`;
 }
 
+// How the tournament works, for the Format dropdown on the Leaderboard.
+function formatInfo(config) {
+  const rounds = enabledRounds(config);
+  const seeded = rounds.find((r) => r.seeded);
+  const unseeded = rounds.filter((r) => !r.seeded).map((r) => r.day.split(' ')[0]);
+  return `<div class="info-panel">
+    <p><b>Teams:</b> ${config.teams.length} teams of 2. Everything is match play, straight up (no handicaps).</p>
+    <p><b>Every round</b> (${rounds.map((r) => r.day.split(' ')[0]).join(', ')}), each group of two teams plays:</p>
+    <ul>
+      <li><b>Front 9: Best ball.</b> Team vs team. Everyone plays their own ball and enters their own score; the lower score on each team is the team's score for the hole.</li>
+      <li><b>Back 9: Singles.</b> Two 1-on-1 matches between the players in the group.</li>
+    </ul>
+    <p><b>Winning a match:</b> the lower score wins the hole; same score halves it. Whoever wins more holes wins the match. It ends early once one side is up by more holes than are left (e.g. <i>Won 3&2</i> = 3 up with 2 to play).</p>
+    <p><b>Points:</b> Win = 1 · Tie = ½ · Loss = 0. Each team can win 3 points a day (best ball + both singles), ${rounds.length * 3} over the trip. Most points at the end wins.</p>
+    <p><b>Matchups:</b> ${unseeded.join(', ')}: groups rotate so every team plays every other team once.${seeded ? ` ${seeded.day.split(' ')[0]}: seeded from the standings, 1st v 2nd and 3rd v 4th (TBD until the earlier rounds are final).` : ''}</p>
+    <p><b>Picked up?</b> Leave the score blank. In best ball your partner's score counts.</p>
+    <p><b>Reading a match:</b> <i>2 UP thru 6</i> = leading by 2 holes after 6. <i>All square</i> = tied. <i>Dormie</i> = up by exactly the holes left, so the other side can only tie.</p>
+    <p><b>Side game:</b> the Birdie Board counts everyone's birdies (eagles count as birdies).</p>
+  </div>`;
+}
+
 // ---------- Leaderboard ----------
 
 function renderBoard() {
@@ -317,11 +338,16 @@ function renderBoard() {
       <div class="card teams">${teamRows}</div>
       <p class="note">Win = 1 · Tie = ½ · Loss = 0 &nbsp;·&nbsp; 3 pts per team up for grabs each day</p>
       ${panel}
-      <details class="note tb-rules"><summary>Tiebreakers</summary>
+      <div class="info-toggles">
+        <button class="info-btn ${ui.info === 'format' ? 'on' : ''}" data-action="info" data-id="format">Format ${ui.info === 'format' ? '▴' : '▾'}</button>
+        <button class="info-btn ${ui.info === 'tiebreakers' ? 'on' : ''}" data-action="info" data-id="tiebreakers">Tiebreakers ${ui.info === 'tiebreakers' ? '▴' : '▾'}</button>
+      </div>
+      ${ui.info === 'format' ? formatInfo(config) : ''}
+      ${ui.info === 'tiebreakers' ? `<div class="info-panel">
         <p>If teams are level on points (for Tuesday's seeding after Monday, and for the final standings):</p>
         <ol>${TIEBREAKERS.map((tb) => `<li>${tb.label}</li>`).join('')}</ol>
         <p><b>Head-to-head</b> counts points only from matches between the tied teams. <b>Holes-up margin</b> adds up how much each match was won or lost by (Won 3&2 = +3, lost 1 UP = −1). <b>Total strokes</b> is both players' scores added up over the rounds that count. <b>Putt-off</b>: if it's still dead even, the tied teams settle it on the putting green and someone records the winner here.</p>
-      </details>
+      </div>` : ''}
     </section>
     <section>
       <h2>Matches</h2>
@@ -1037,6 +1063,9 @@ app.addEventListener('click', async (e) => {
     case 'close-picker':
       ui.pickingMe = false;
       if (!ui.me) ui.watching = true;
+      break;
+    case 'info':
+      ui.info = ui.info === el.dataset.id ? null : el.dataset.id;
       break;
     case 'feed-filter':
       ui.feedFilter = el.dataset.id;
