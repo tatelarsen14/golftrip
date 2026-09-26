@@ -47,16 +47,23 @@ export const DEFAULT_CONFIG = {
       groups: [{ teams: [0, 1], cross: true }, { teams: [2, 3], cross: true }],
     },
   ],
-  // Par by hole for each round. Anyone can correct a hole's par from the
-  // Scores tab; unconfirmed holes default to 4.
+  // Par by hole for each round, from the course scorecards. Anyone can
+  // still correct a hole's par from the Scores tab.
   pars: {
-    // Back nine from the published scorecard (course par 72).
-    sat: parsFrom([4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 5, 3, 4, 4, 3, 5, 4]),
-    sun: parsFrom(Array(18).fill(4)), // par 71
-    // Back nine from the published scorecard (course par 72).
-    mon: parsFrom([4, 4, 4, 4, 4, 4, 4, 4, 4, 3, 4, 4, 5, 4, 4, 3, 4, 5]),
-    tue: parsFrom(Array(18).fill(4)), // par 71
+    sat: parsFrom([5, 4, 3, 4, 5, 4, 3, 4, 4, 4, 4, 5, 3, 4, 4, 3, 5, 4]), // Circling Raven, 72
+    sun: parsFrom([4, 3, 5, 3, 4, 5, 4, 4, 3, 4, 3, 5, 4, 4, 5, 3, 4, 4]), // Scarecrow, 71
+    mon: parsFrom([4, 4, 5, 3, 4, 3, 5, 4, 4, 3, 4, 4, 5, 4, 4, 3, 4, 5]), // Gamble Sands, 72
+    tue: parsFrom([5, 4, 3, 4, 3, 3, 4, 4, 5, 4, 5, 3, 4, 3, 5, 4, 4, 4]), // Coeur d'Alene Resort, 71
   },
+};
+
+// Hole handicap (stroke index) from each scorecard: 1 = hardest hole.
+// Not used for scoring yet; here for handicap strokes if we add them.
+export const HOLE_HANDICAPS = {
+  sat: [7, 11, 15, 1, 5, 13, 17, 9, 3, 14, 6, 2, 12, 18, 8, 16, 4, 10],
+  sun: [3, 9, 11, 5, 17, 15, 1, 7, 13, 4, 18, 16, 8, 2, 10, 12, 6, 14],
+  mon: [7, 11, 1, 15, 5, 13, 3, 17, 9, 14, 6, 18, 12, 2, 8, 10, 4, 16],
+  tue: [7, 3, 17, 5, 13, 15, 11, 9, 1, 6, 2, 14, 12, 10, 16, 8, 18, 4],
 };
 
 function parsFrom(list) {

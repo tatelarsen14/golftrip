@@ -102,6 +102,11 @@ test('standings add up: team gets best ball + singles points', () => {
   assert.equal(teams[2].points, 0);
 });
 
+test('course pars match the scorecard totals', () => {
+  const total = (id) => Object.values(cfg.pars[id]).reduce((a, b) => a + b, 0);
+  assert.deepEqual(['sat', 'sun', 'mon', 'tue'].map(total), [72, 71, 72, 71]);
+});
+
 test('default config has no Friday round and 4 x 6 matches', () => {
   assert.equal(cfg.rounds.some((r) => r.id === 'fri'), false);
   assert.equal(buildMatches(cfg).length, 4 * 6);
@@ -120,9 +125,9 @@ test('score marks relative to par', () => {
 
 test('birdie counts use each round\'s pars and skip disabled rounds', () => {
   const c = structuredClone(cfg);
-  // Circling Raven 12 is a par 5, 13 a par 3.
+  // Circling Raven: 1 par 5, 2 par 4, 12 par 5, 13 par 3. Scarecrow 1 is a par 4.
   const scores = {
-    sat: { tate: { 12: 4, 13: 2, 1: 3, 2: 5 }, sam: { 12: 3 } },
+    sat: { tate: { 12: 4, 13: 2, 1: 4, 2: 5 }, sam: { 12: 3 } },
     sun: { tate: { 1: 3 } },
   };
   let counts = birdieCounts(c, scores);
