@@ -613,7 +613,7 @@ label.btn.disabled { opacity: .4; }
 .entry-row { display: block; }
 .entry-top { display: flex; align-items: center; gap: 10px; }
 .entry-top .stepper output { width: 44px; }
-.quick { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; margin-top: 8px; }
+.quick { display: grid; grid-template-columns: repeat(var(--n, 6), 1fr); gap: 5px; margin-top: 8px; }
 .q {
   display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 0 5px;
   border: 1px solid var(--line); background: var(--cream); border-radius: 10px; font: 700 18px Oswald, sans-serif;
@@ -652,3 +652,5 @@ label.btn.disabled { opacity: .4; }
 @keyframes wb-fall { to { transform: translateY(105vh) rotate(540deg); } }
 @keyframes wb-pop { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 @keyframes wb-fade { from { opacity: 0; } to { opacity: 1; } }
+.highlight.ace { border-left-color: #b8860b; background: #fbf0d4; }
+.highlight.ace .hl-title { font-size: 17px; }

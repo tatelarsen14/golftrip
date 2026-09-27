@@ -403,7 +403,7 @@ export function highlights(config, scores, times) {
           const par = parFor(config, round.id, h);
           if (!isBirdieOrBetter(sc[h], par)) { endRun(h - 1); continue; }
           if (!start) start = h;
-          const type = scoreMark(sc[h], par);
+          const type = sc[h] === 1 ? 'ace' : scoreMark(sc[h], par);
           items.push({
             id: `hl-${round.id}-${pid}-${h}-${type}`, type, player: pid, score: sc[h], par,
             roundId: round.id, hole: h, at: at(round.id, [pid], h),

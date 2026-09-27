@@ -280,3 +280,14 @@ test('highlights: birdies, eagles, birdie runs, 3-hole runs and match results', 
   assert.equal(runs[0].n, 5); // closed out 5&4 after 5 holes
   assert.equal(hl[0].id, 'hl-sat-tate-5-eagle'); // newest first
 });
+
+test('a hole in one is its own highlight and counts as a birdie', () => {
+  // Circling Raven #3 is a par 3; Scarecrow #18 is a drivable par 4.
+  const scores = { sat: { tate: { 3: 1 } }, sun: { sam: { 18: 1 } } };
+  const ids = highlights(cfg, scores, {}).map((h) => h.id);
+  assert.ok(ids.includes('hl-sat-tate-3-ace'));
+  assert.ok(ids.includes('hl-sun-sam-18-ace'));
+  const counts = birdieCounts(cfg, scores);
+  assert.equal(counts.tate.birdies, 1);
+  assert.equal(counts.sam.birdies, 1);
+});

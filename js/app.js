@@ -57,12 +57,14 @@ function marked(score, par) {
 // Highest score allowed on a hole: triple bogey.
 const MAX_OVER_PAR = 3;
 const SCORE_NAMES = { '-3': 'Albatross', '-2': 'Eagle', '-1': 'Birdie', 0: 'Par', 1: 'Bogey', 2: 'Double', 3: 'Triple' };
-// Buttons on the score screen: eagle (or an ace on a par 3) up to the max.
+// Buttons on the score screen: an ace on par 3s and par 4s (some are
+// drivable), otherwise eagle, up to the max.
 const scoreChoices = (par) => {
   const list = [];
-  for (let n = Math.max(1, par - 2); n <= par + MAX_OVER_PAR; n++) list.push(n);
+  for (let n = par <= 4 ? 1 : par - 2; n <= par + MAX_OVER_PAR; n++) list.push(n);
   return list;
 };
+const scoreName = (n, par) => (n === 1 ? 'Ace' : SCORE_NAMES[n - par] || '');
 
 const LEGEND = `<div class="legend">
   <span><span class="mk eagle">3</span> Eagle+</span>
@@ -573,9 +575,9 @@ function renderEntry() {
     const total = Object.values(roundScores[p.id] || {}).reduce((a, b) => a + b, 0);
     // One tap per score: eagle through triple bogey (the max). Tap the
     // selected number again to clear it.
-    const quick = canScore && par ? `<div class="quick">${scoreChoices(par).map((n) => `
+    const quick = canScore && par ? `<div class="quick" style="--n:${scoreChoices(par).length}">${scoreChoices(par).map((n) => `
       <button class="q ${v === n ? 'on' : ''}" data-action="set-score" data-player="${p.id}" data-value="${n}">
-        <span class="qn ${scoreMark(n, par)}">${n}</span><small>${SCORE_NAMES[n - par] || ''}</small></button>`).join('')}</div>` : '';
+        <span class="qn ${scoreMark(n, par)}">${n}</span><small>${scoreName(n, par)}</small></button>`).join('')}</div>` : '';
     return `<div class="entry-row">
       <div class="entry-top">
         ${teamDot(p.team)}
@@ -865,6 +867,7 @@ function highlightText(config, h) {
   const where = `#${h.hole} · ${esc(roundName(config, h.roundId))}`;
   const side = (m, si) => esc(sideLabel(m.sides[si]));
   switch (h.type) {
+    case 'ace': return [`⛳ HOLE IN ONE! ${who} aced the par ${h.par}`, where];
     case 'eagle': return [`🦅 EAGLE! ${who} made ${h.score} on the par ${h.par}`, where];
     case 'birdie': return [`🐦 ${who} birdied`, `${where} · ${h.score} on a par ${h.par}`];
     case 'birdieRun': return [`🔥 ${who}: ${h.n} birdies in a row!`, `#${h.hole - h.n + 1}–${h.hole} · ${esc(roundName(config, h.roundId))}`];
@@ -1130,6 +1133,7 @@ function namePicker() {
 // render, so opening the app doesn't replay old results.
 let seenFinals = null;
 let seenChampion = null;
+let seenAces = null;
 const celebrations = [];
 
 function checkForFinishes() {
@@ -1148,6 +1152,24 @@ function checkForFinishes() {
     fresh.forEach(({ m, res }) => celebrations.push(matchBanner(m, res)));
     if (champKey !== null && seenChampion !== champKey) celebrations.push(championBanner(champ));
   }
+  // Aces get their own banner, the biggest one in the app.
+  const aces = new Set();
+  for (const r of enabledRounds(view)) {
+    for (const [pid, holes] of Object.entries(store.scores[r.id] || {})) {
+      for (const [hole, v] of Object.entries(holes)) {
+        if (v !== 1) continue;
+        const key = `${r.id}-${pid}-${hole}`;
+        aces.add(key);
+        if (seenAces && !seenAces.has(key)) {
+          celebrations.unshift({
+            color: '#b8860b', kicker: `${esc(r.day.split(' ')[0])} · ${esc(r.course)} · Hole ${hole}`,
+            title: 'Hole in one!', score: '⛳ 1', sub: `${esc(playerName(pid))} aced the par ${parFor(view, r.id, hole)}`, big: true,
+          });
+        }
+      }
+    }
+  }
+  seenAces = aces;
   seenFinals = finals;
   seenChampion = champKey;
   if (celebrations.length && !document.querySelector('.win-banner')) showNextCelebration();
