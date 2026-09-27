@@ -265,6 +265,47 @@ function formatInfo(config) {
   </div>`;
 }
 
+// TV-broadcast style match bar for the Leaderboard: the leading side lights
+// up in its team color, the middle box shows the score, and a hole-by-hole
+// strip above shows who won each hole.
+function broadcastCard(config, match, res) {
+  const color = (si) => teamColor(match.sides[si].team);
+  const kind = match.type === 'bestball' ? 'Best Ball · Front 9' : 'Singles · Back 9';
+  const streak = !res.done ? matchStreak(res) : null;
+  const side = (si) => {
+    const s = match.sides[si];
+    const lead = res.leader === si;
+    const lost = res.done && res.leader !== null && !lead;
+    const badge = streak?.n >= 2 ? (streak.side === si ? ` <span class="bc-streak">🔥${streak.n}</span>` : ' <span class="bc-streak">🥶</span>') : '';
+    return `<div class="bc-side ${si ? 'b' : 'a'} ${lead ? 'lead' : 'trail'} ${lost ? 'lost' : ''}" style="--c:${color(si)}">
+      <div class="bc-team">${esc(config.teams[s.team]?.name)}</div>
+      <div class="bc-names">${s.players.map((p) => esc(playerName(p))).join(' / ')}${badge}</div>
+    </div>`;
+  };
+  let status;
+  if (res.played === 0) {
+    status = '<div class="bc-status"><div class="big">–</div><div class="small">Not started</div></div>';
+  } else if (res.done) {
+    const big = res.leader === null ? 'Halved' : esc(res.status.replace('Won ', ''));
+    status = `<div class="bc-status final"><div class="big ${res.leader === null ? 'sm' : ''}">${big}</div><div class="small">Final</div></div>`;
+  } else if (res.leader === null) {
+    status = `<div class="bc-status"><div class="big">A/S</div><div class="small">Thru ${res.played}</div></div>`;
+  } else {
+    const dormie = res.up === res.remaining ? 'Dormie<br>' : '';
+    status = `<div class="bc-status up ${res.leader === 0 ? 'left' : 'right'}" style="--c:${color(res.leader)}">
+      <div class="big">${res.up} UP</div><div class="small">${dormie}Thru ${res.played}</div></div>`;
+  }
+  const holes = res.holes.map((h) => {
+    if (h.winner === 0 || h.winner === 1) return `<div class="w" style="--c:${color(h.winner)}">${h.hole}</div>`;
+    return `<div class="${h.winner === 'halve' ? 'h' : ''}">${h.hole}</div>`;
+  }).join('');
+  return `<article class="bc-match">
+    <div class="bc-kind"><span>${kind}</span><span>${res.done ? 'Final' : res.played ? `Thru ${res.played}` : ''}</span></div>
+    ${res.played ? `<div class="bc-holes">${holes}</div>` : ''}
+    <div class="bc-bar">${side(0)}${status}${side(1)}</div>
+  </article>`;
+}
+
 // ---------- Leaderboard ----------
 
 function renderBoard() {
@@ -355,10 +396,13 @@ function renderBoard() {
     <section>
       <h2>Matches</h2>
       ${roundChips(round?.id)}
-      ${round?.pending ? pendingNote(config, round) : round ? round.groups.map((g, gi) => `
-        <h3>${groupTitle(round, gi)} · ${groupLabel(config, g)}</h3>
-        ${roundMatches.filter((m) => m.match.group === gi).map((m) => matchCard(m.match, m.result)).join('')}
-      `).join('') : '<p class="empty">No rounds enabled.</p>'}
+      ${round?.pending ? pendingNote(config, round) : round ? `<div class="bc-wrap">
+        <div class="bc-top"><span>Buckle Up · Match Play</span>
+          ${roundMatches.some((m) => m.result.played > 0 && !m.result.done) ? '<span class="bc-live">LIVE</span>' : ''}</div>
+        ${round.groups.map((g, gi) => `
+        <div class="bc-session"><span>${esc(round.day.split(' ')[0])} · ${esc(round.course)}</span><span>${groupTitle(round, gi)}</span></div>
+        ${roundMatches.filter((m) => m.match.group === gi).map((m) => broadcastCard(config, m.match, m.result)).join('')}
+      `).join('')}</div>` : '<p class="empty">No rounds enabled.</p>'}
     </section>
     <section>
       <h2>Birdie Board 🐦</h2>
