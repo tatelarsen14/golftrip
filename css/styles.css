@@ -608,3 +608,21 @@ label.btn.disabled { opacity: .4; }
 
 .hole-max { font: 600 12px Inter, sans-serif; color: var(--muted); letter-spacing: 0; margin-left: 4px; }
 .legend .counted-swatch { background: #d8eadd; border-radius: 3px; font-weight: 700; }
+
+/* one-tap score buttons */
+.entry-row { display: block; }
+.entry-top { display: flex; align-items: center; gap: 10px; }
+.entry-top .stepper output { width: 44px; }
+.quick { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; margin-top: 8px; }
+.q {
+  display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 0 5px;
+  border: 1px solid var(--line); background: var(--cream); border-radius: 10px; font: 700 18px Oswald, sans-serif;
+}
+.qn { line-height: 1.1; }
+.qn.birdie, .qn.eagle { color: var(--under); }
+.qn.bogey, .qn.double { color: var(--muted); }
+.q small { font: 600 9px Inter, sans-serif; color: var(--muted); letter-spacing: .02em; }
+.q:active { transform: scale(.96); }
+.q.on { background: var(--forest); border-color: var(--forest); color: var(--cream); }
+.q.on .qn { color: var(--cream); }
+.q.on small { color: #cfe3d4; }

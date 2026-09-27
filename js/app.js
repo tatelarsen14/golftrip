@@ -56,6 +56,13 @@ function marked(score, par) {
 
 // Highest score allowed on a hole: triple bogey.
 const MAX_OVER_PAR = 3;
+const SCORE_NAMES = { '-3': 'Albatross', '-2': 'Eagle', '-1': 'Birdie', 0: 'Par', 1: 'Bogey', 2: 'Double', 3: 'Triple' };
+// Buttons on the score screen: eagle (or an ace on a par 3) up to the max.
+const scoreChoices = (par) => {
+  const list = [];
+  for (let n = Math.max(1, par - 2); n <= par + MAX_OVER_PAR; n++) list.push(n);
+  return list;
+};
 
 const LEGEND = `<div class="legend">
   <span><span class="mk eagle">3</span> Eagle+</span>
@@ -564,16 +571,18 @@ function renderEntry() {
   const rows = players.map((p) => {
     const v = roundScores[p.id]?.[hole];
     const total = Object.values(roundScores[p.id] || {}).reduce((a, b) => a + b, 0);
+    // One tap per score: eagle through triple bogey (the max). Tap the
+    // selected number again to clear it.
+    const quick = canScore && par ? `<div class="quick">${scoreChoices(par).map((n) => `
+      <button class="q ${v === n ? 'on' : ''}" data-action="set-score" data-player="${p.id}" data-value="${n}">
+        <span class="qn ${scoreMark(n, par)}">${n}</span><small>${SCORE_NAMES[n - par] || ''}</small></button>`).join('')}</div>` : '';
     return `<div class="entry-row">
-      ${teamDot(p.team)}
-      <div class="entry-name">${esc(playerName(p.id))}${bStreak(p.id)}<small>${total ? `${total} total` : ''}</small></div>
-      ${canScore ? `<div class="stepper">
-        <button data-action="step" data-player="${p.id}" data-delta="-1" aria-label="Minus">−</button>
-        <output class="${v ? '' : 'blank'}">${v ? marked(v, par) : '–'}</output>
-        <button data-action="step" data-player="${p.id}" data-delta="1" aria-label="Plus" ${v && par && v >= par + MAX_OVER_PAR ? 'disabled' : ''}>+</button>
+      <div class="entry-top">
+        ${teamDot(p.team)}
+        <div class="entry-name">${esc(playerName(p.id))}${bStreak(p.id)}<small>${total ? `${total} total` : ''}</small></div>
+        <div class="stepper"><output class="${v ? '' : 'blank'}">${v ? marked(v, par) : '–'}</output></div>
       </div>
-      <button class="clear" data-action="clear" data-player="${p.id}" aria-label="Clear" ${v ? '' : 'disabled'}>✕</button>`
-        : `<div class="stepper"><output class="${v ? '' : 'blank'}">${v ? marked(v, par) : '–'}</output></div>`}
+      ${quick}
     </div>`;
   }).join('');
 
@@ -1205,25 +1214,22 @@ app.addEventListener('click', async (e) => {
       advancePending = null;
       ui.hole = Number(el.dataset.hole);
       break;
-    case 'step': {
+    case 'set-score': {
       if (!isPlayer()) return;
-      const cur = store.scores[round.id]?.[el.dataset.player]?.[ui.hole];
-      const delta = Number(el.dataset.delta);
-      // First tap on a blank score starts at par.
-      // First tap starts at par; triple bogey is the max.
-      const par = parFor(store.config, round.id, ui.hole) || 4;
-      const next = cur ? Math.min(par + MAX_OVER_PAR, Math.max(1, cur + delta)) : par;
+      const pid = el.dataset.player;
+      const value = Number(el.dataset.value);
+      const cur = store.scores[round.id]?.[pid]?.[ui.hole];
       const before = groupHoleComplete(round, ui.hole);
-      store.setScore(round.id, el.dataset.player, ui.hole, next).catch(showError);
+      if (cur === value) {
+        clearTimeout(advanceTimer);
+        advancePending = null;
+        store.setScore(round.id, pid, ui.hole, null).catch(showError);
+        return;
+      }
+      store.setScore(round.id, pid, ui.hole, value).catch(showError);
       scheduleAdvance(round, before);
       return;
     }
-    case 'clear':
-      if (!isPlayer()) return;
-      clearTimeout(advanceTimer);
-      advancePending = null;
-      store.setScore(round.id, el.dataset.player, ui.hole, null).catch(showError);
-      return;
     case 'set-me':
       ui.me = el.dataset.id;
       ui.pickingMe = false;
