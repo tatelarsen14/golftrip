@@ -557,3 +557,18 @@ label.btn.disabled { opacity: .4; }
 .cup-pts { font: 700 34px Oswald, sans-serif; line-height: 1; text-align: right; min-width: 44px; }
 .cup-live { font: 700 10px Inter, sans-serif; letter-spacing: .06em; text-transform: uppercase; color: #ffd873; margin-top: 3px; }
 .cup-tb { font-size: 11px; font-weight: 600; color: #ffd873; margin-top: 4px; }
+
+/* Leaderboard: your match / countdown */
+.yours { margin-top: 12px; }
+.yours.card { border-left: 5px solid #d9ad4a; }
+.yours-kicker { font: 600 11px Inter, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.yours-title { font: 700 22px Oswald, sans-serif; color: var(--forest); text-transform: uppercase; letter-spacing: .03em; margin: 2px 0; }
+.yours-detail { font-size: 15px; font-weight: 700; }
+.yours-sub { font-size: 13px; font-weight: 500; color: var(--muted); margin-top: 1px; }
+.yours .kv { font-size: 14px; }
+.yours.bc-wrap { padding-bottom: 12px; }
+.yours .bc-top { margin-bottom: 8px; }
+.yours-tee { font: 600 11px Inter, sans-serif; letter-spacing: .08em; color: #d9ad4a; }
+.yours-body .bc-match { margin-bottom: 10px; }
+.yours-go { width: 100%; background: #d9ad4a; color: #0d1f17; }
+.countdown .yours-title { font-size: 26px; }

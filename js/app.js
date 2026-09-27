@@ -308,6 +308,70 @@ function broadcastCard(config, match, res) {
   </article>`;
 }
 
+// "Your match" card at the top of the Leaderboard: your live match on a
+// round day, otherwise a countdown to your next tee time.
+function yourMatchCard(config, standings) {
+  const rounds = enabledRounds(config);
+  if (!rounds.length || tripFinal(config, store.scores)) return '';
+  const today = new Date().toLocaleDateString('en-CA');
+  const daysUntil = (date) => Math.round((new Date(`${date}T00:00`) - new Date(`${today}T00:00`)) / 86400000);
+  const me = isPlayer() ? ui.me : null;
+  const myTeam = me ? teamOf(config, me) : -1;
+  const myGroup = (r) => (r.pending ? -1 : r.groups.findIndex((g) => g.teams.includes(myTeam)));
+  const dayName = (r) => esc(r.day.split(' ')[0]);
+  const todayRound = rounds.find((r) => r.date === today);
+
+  if (todayRound && me) {
+    const gi = myGroup(todayRound);
+    if (gi < 0) {
+      return `<div class="yours card"><div class="yours-kicker">Today · ${dayName(todayRound)} · ${esc(todayRound.course)}</div>
+        <div class="yours-title">Matchups TBD</div><p class="muted">Set once the earlier rounds are final.</p></div>`;
+    }
+    const mine = standings.matches.filter((m) => m.match.roundId === todayRound.id && m.match.group === gi
+      && m.match.sides.some((sd) => sd.players.includes(me)));
+    const current = mine.find((m) => !m.result.done);
+    const tee = todayRound.tees?.[gi];
+    const go = `<button class="btn yours-go" data-action="go-scores" data-round="${todayRound.id}" data-group="${gi}">Enter scores →</button>`;
+    if (current) {
+      return `<div class="yours bc-wrap">
+        <div class="bc-top"><span>Your match · ${dayName(todayRound)}</span><span class="yours-tee">${current.result.played ? esc(todayRound.course) : `Tee time ${esc(tee || '')}`}</span></div>
+        <div class="yours-body">${broadcastCard(config, current.match, current.result)}</div>
+        ${go}
+      </div>`;
+    }
+    const lines = mine.map(({ match, result }) => {
+      const si = match.sides.findIndex((sd) => sd.players.includes(me));
+      const outcome = result.leader === null ? 'Halved' : result.leader === si ? result.status : `Lost ${result.status.replace('Won ', '')}`;
+      return `<div class="kv"><span>${match.type === 'bestball' ? 'Best ball' : 'Singles'}</span><b>${esc(outcome)}</b></div>`;
+    }).join('');
+    const pts = mine.reduce((a, { match, result }) => a + (result.points?.[match.sides.findIndex((sd) => sd.players.includes(me))] || 0), 0);
+    return `<div class="yours card"><div class="yours-kicker">Today · ${dayName(todayRound)} · ${esc(todayRound.course)}</div>
+      <div class="yours-title">You're done for the day · ${fmtHalf(pts)} pt${pts === 1 ? '' : 's'}</div>${lines}</div>`;
+  }
+
+  const next = rounds.find((r) => r.date > today);
+  if (!next) return '';
+  const days = daysUntil(next.date);
+  const beforeTrip = next === rounds[0];
+  const when = days === 1 ? 'Tomorrow' : beforeTrip ? `${days} days to tee off` : `${dayName(next)} · in ${days} days`;
+  let sub = '';
+  if (me && !next.pending) {
+    const gi = myGroup(next);
+    const opp = next.groups[gi]?.teams.find((t) => t !== myTeam);
+    if (gi >= 0) sub = `${esc(next.tees?.[gi] || '')} tee time · vs ${esc(config.teams[opp]?.name)}`;
+  } else if (next.pending) {
+    sub = 'Matchups TBD';
+  } else if (next.tees?.length) {
+    sub = `First tee ${esc(next.tees[0])}`;
+  }
+  const detail = `${dayName(next)} · ${esc(next.course)}${sub ? `<div class="yours-sub">${sub}</div>` : ''}`;
+  return `<div class="yours card countdown">
+    <div class="yours-kicker">${beforeTrip ? 'Countdown' : 'Next up'}</div>
+    <div class="yours-title">⛳ ${when}</div>
+    <div class="yours-detail">${detail}</div>
+  </div>`;
+}
+
 // ---------- Leaderboard ----------
 
 function renderBoard() {
@@ -386,6 +450,7 @@ function renderBoard() {
 
   return `
     ${champBanner}
+    ${yourMatchCard(config, standings)}
     <section>
       <div class="cup">
         <div class="cup-head"><span>Team Standings</span><span>${maxPts} pts per team in play</span></div>
@@ -1114,6 +1179,16 @@ app.addEventListener('click', async (e) => {
       ui.pickingMe = false;
       if (!ui.me) ui.watching = true;
       break;
+    case 'go-scores': {
+      // Jump to the first hole this player hasn't scored yet in that round.
+      const sc = store.scores[el.dataset.round]?.[ui.me] || {};
+      ui.tab = 'scores';
+      ui.roundId = el.dataset.round;
+      ui.group = Number(el.dataset.group);
+      ui.hole = [...FRONT_NINE, ...BACK_NINE].find((h) => !sc[h]) || 18;
+      window.scrollTo(0, 0);
+      break;
+    }
     case 'info':
       ui.info = ui.info === el.dataset.id ? null : el.dataset.id;
       break;

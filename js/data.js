@@ -22,7 +22,7 @@ export const PLAYERS = [
 
 export const TEAM_COLORS = ['#2f7d4f', '#1f5f99', '#b5541c', '#7a3fa0'];
 
-// Groups rotate so every team sees every other team; singles opponents
+// Tee times are per group (Group 1 first). Groups rotate so every team sees every other team; singles opponents
 // alternate within the group. Friday's round isn't part of the tournament,
 // and Tuesday is seeded from the standings after Monday.
 export const DEFAULT_CONFIG = {
@@ -35,20 +35,20 @@ export const DEFAULT_CONFIG = {
   ],
   rounds: [
     {
-      id: 'sat', date: '2026-10-03', day: 'Sat Oct 3', course: 'Circling Raven', enabled: true,
+      id: 'sat', tees: ['12:20 PM', '12:30 PM'], date: '2026-10-03', day: 'Sat Oct 3', course: 'Circling Raven', enabled: true,
       groups: [{ teams: [0, 1], cross: false }, { teams: [2, 3], cross: false }],
     },
     {
-      id: 'sun', date: '2026-10-04', day: 'Sun Oct 4', course: 'Scarecrow', enabled: true,
+      id: 'sun', tees: ['12:35 PM', '12:45 PM'], date: '2026-10-04', day: 'Sun Oct 4', course: 'Scarecrow', enabled: true,
       groups: [{ teams: [0, 2], cross: true }, { teams: [1, 3], cross: true }],
     },
     {
-      id: 'mon', date: '2026-10-05', day: 'Mon Oct 5', course: 'Gamble Sands', enabled: true,
+      id: 'mon', tees: ['12:20 PM', '12:30 PM'], date: '2026-10-05', day: 'Mon Oct 5', course: 'Gamble Sands', enabled: true,
       groups: [{ teams: [0, 3], cross: false }, { teams: [1, 2], cross: false }],
     },
     {
       // Seeded: 1st v 2nd and 3rd v 4th once Sat-Mon are final.
-      id: 'tue', date: '2026-10-06', day: 'Tue Oct 6', course: "Coeur d'Alene", enabled: true, seeded: true,
+      id: 'tue', tees: ['9:20 AM', '9:30 AM'], date: '2026-10-06', day: 'Tue Oct 6', course: "Coeur d'Alene", enabled: true, seeded: true,
       groups: [{ teams: [0, 1], cross: true }, { teams: [2, 3], cross: true }],
     },
   ],
