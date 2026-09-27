@@ -590,13 +590,11 @@ function renderEntry() {
     <div class="card entry">
       <div class="entry-head">
         <div><div class="hole-num">Hole ${hole}</div>
-        <div class="hole-par">Par ${par ?? '–'}${HOLE_HANDICAPS[round.id] ? ` · Hcp ${HOLE_HANDICAPS[round.id][hole - 1]}` : ''}</div>
-        <div class="muted">${isFront ? 'Best Ball — low score on each team counts' : 'Singles match play'}</div></div>
+        <div class="hole-par">Par ${par ?? '–'}${HOLE_HANDICAPS[round.id] ? ` · Hcp ${HOLE_HANDICAPS[round.id][hole - 1]}` : ''}${par ? ` <span class="hole-max">Max ${par + MAX_OVER_PAR}</span>` : ''}</div></div>
         <span class="badge ${isFront ? 'bb' : 'sg'}">${isFront ? 'Best Ball' : 'Singles'}</span>
       </div>
       ${rows}
       ${canScore ? '' : `<p class="spectator-note">👀 Spectator view: only players enter scores.${ui.me ? '' : ' <button class="link" data-action="change-me">Are you a player?</button>'}</p>`}
-      <p class="note">Everyone enters their own score. Max score is triple bogey${par ? ` (${par + MAX_OVER_PAR} on this hole)` : ''}.</p>
       <div class="nav-row">
         <button class="btn ghost" data-action="hole" data-hole="${Math.max(1, hole - 1)}" ${hole === 1 ? 'disabled' : ''}>← Hole ${hole - 1 || ''}</button>
         <button class="btn" data-action="hole" data-hole="${Math.min(18, hole + 1)}" ${hole === 18 ? 'disabled' : ''}>Hole ${hole < 18 ? hole + 1 : ''} →</button>
@@ -686,7 +684,6 @@ function renderCards() {
     <h2>${esc(round.course)} · ${esc(round.day)}</h2>
     ${courseCard(config, round, roundScores)}
     ${LEGEND}
-    <p class="note">Max score on any hole is triple bogey (par + 3).</p>
     <h2>Match cards</h2>
     ${round.groups.map((g, gi) => `
       <h3>${groupTitle(round, gi)} · ${groupLabel(config, g)}</h3>
@@ -694,7 +691,7 @@ function renderCards() {
         const res = computeMatch(m, roundScores);
         return `<div class="card sc-card">${matchCard(m, res, { compact: true })}${scorecard(m, res, roundScores, pars)}</div>`;
       }).join('')}`).join('')}
-    <p class="note">Green-shaded scores are the ones counting for best ball. The match row shows how many holes up the leading side is (in their team color).</p>`;
+    <div class="legend"><span><span class="mk counted-swatch">4</span> Counted for best ball</span><span>Max score: triple bogey</span></div>`;
 }
 
 // ---------- Trip ----------

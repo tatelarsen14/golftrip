@@ -605,3 +605,6 @@ label.btn.disabled { opacity: .4; }
 .bb-bar span { display: block; height: 100%; border-radius: 99px; }
 .bb-row b { text-align: right; }
 .bb-zero { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 8px; margin-top: 2px; }
+
+.hole-max { font: 600 12px Inter, sans-serif; color: var(--muted); letter-spacing: 0; margin-left: 4px; }
+.legend .counted-swatch { background: #d8eadd; border-radius: 3px; font-weight: 700; }
