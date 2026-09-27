@@ -1124,6 +1124,84 @@ function namePicker() {
   </div></div>`;
 }
 
+// ---------- Match-winning banner ----------
+
+// Matches already final when this phone last looked; null until the first
+// render, so opening the app doesn't replay old results.
+let seenFinals = null;
+let seenChampion = null;
+const celebrations = [];
+
+function checkForFinishes() {
+  const finals = new Set();
+  const fresh = [];
+  for (const m of buildMatches(view)) {
+    const res = computeMatch(m, store.scores[m.roundId]);
+    if (!res.done) continue;
+    finals.add(m.id);
+    if (seenFinals && !seenFinals.has(m.id)) fresh.push({ m, res });
+  }
+  const final = tripFinal(view, store.scores);
+  const champ = final ? rankTeams(view, store.scores, enabledRounds(view).map((r) => r.id), 'final').ranked[0] : null;
+  const champKey = champ && !champ.unresolved ? champ.idx : null;
+  if (seenFinals) {
+    fresh.forEach(({ m, res }) => celebrations.push(matchBanner(m, res)));
+    if (champKey !== null && seenChampion !== champKey) celebrations.push(championBanner(champ));
+  }
+  seenFinals = finals;
+  seenChampion = champKey;
+  if (celebrations.length && !document.querySelector('.win-banner')) showNextCelebration();
+}
+
+function matchBanner(m, res) {
+  const round = view.rounds.find((r) => r.id === m.roundId);
+  const kind = `${round?.day.split(' ')[0] || ''} · ${m.type === 'bestball' ? 'Best Ball' : 'Singles'}`;
+  const names = (si) => esc(sideLabel(m.sides[si]));
+  if (res.leader === null) {
+    return { color: '#6b7568', kicker: kind, title: 'Halved', score: '½ – ½', sub: `${names(0)} and ${names(1)}` };
+  }
+  const w = res.leader;
+  return {
+    color: teamColor(m.sides[w].team), kicker: kind, title: `${names(w)} win${m.sides[w].players.length > 1 ? '' : 's'}`,
+    score: esc(res.status.replace('Won ', '')), sub: `over ${names(1 - w)}`,
+  };
+}
+
+function championBanner(team) {
+  return {
+    color: teamColor(team.idx), kicker: 'Buckle Up · Final', title: `${esc(team.name)} are the champions`,
+    score: '🏆', sub: esc(team.players.map(playerName).join(' & ')), big: true,
+  };
+}
+
+function showNextCelebration() {
+  const c = celebrations.shift();
+  if (!c) return;
+  const el = document.createElement('div');
+  el.className = `win-banner ${c.big ? 'big' : ''}`;
+  el.style.setProperty('--c', c.color);
+  const calm = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const confetti = calm ? '' : Array.from({ length: 36 }, (_, i) => {
+    const colors = [c.color, '#d9ad4a', '#f4efe3'];
+    return `<i style="left:${Math.random() * 100}%;background:${colors[i % 3]};animation-delay:${(Math.random() * 0.6).toFixed(2)}s;animation-duration:${(1.6 + Math.random() * 1.2).toFixed(2)}s"></i>`;
+  }).join('');
+  el.innerHTML = `<div class="confetti">${confetti}</div>
+    <div class="wb-card">
+      <div class="wb-kicker">${c.kicker}</div>
+      <div class="wb-title">${c.title}</div>
+      <div class="wb-score">${c.score}</div>
+      <div class="wb-sub">${c.sub}</div>
+    </div>`;
+  const close = () => {
+    if (!el.isConnected) return;
+    el.classList.add('out');
+    setTimeout(() => { el.remove(); showNextCelebration(); }, 250);
+  };
+  el.addEventListener('click', close);
+  setTimeout(close, c.big ? 7000 : 4500);
+  document.body.appendChild(el);
+}
+
 // ---------- shell ----------
 
 const TABS = [
@@ -1146,6 +1224,7 @@ function render() {
   }
   renderQueued = false;
   view = resolveConfig(store.config, store.scores);
+  checkForFinishes();
   if (ui.tab === 'cards') { // Cards moved into Scores
     ui.tab = 'scores';
     ui.scoresView = 'card';

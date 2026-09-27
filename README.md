@@ -42,6 +42,8 @@ the result matters: splitting 2nd/3rd for Tuesday's matchups, or 1st for the tit
 
 Streaks: 🔥 next to a side that has won 2+ holes in a row in its match (🥶 for the other side), and 🐦🔥 next to a player with 2+ birdies in a row.
 
+**Match-winning banner**: when a match is clinched, every phone with the app open gets a full-screen "TATE WINS 3&2" banner with confetti in the winner's team color (tap to dismiss). When the last match decides the tournament, a champions banner follows. Matches already final when you open the app don't replay.
+
 **Trip recap**: once the last match is final, the champion banner and the Trip tab link to a recap page with final standings, awards (MVP, Birdie King, Low Round, Hottest Hand, Longest Run, Crowd Favorite, Paparazzi), day-by-day results, the best photos and every player's rounds. Share it with a `#recap` link.
 
 **Names**: the first time someone opens the app it asks who they are (tap the name in the header to change it). People who aren't playing can join as a **spectator** with their own name: they can post, react and comment, but can't enter scores or record putt-offs.
