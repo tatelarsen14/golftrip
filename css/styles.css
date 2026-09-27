@@ -524,3 +524,32 @@ label.btn.disabled { opacity: .4; }
 .bc-status.up.right { clip-path: polygon(0 0, 88% 0, 100% 50%, 88% 100%, 0 100%); }
 .bc-status.final { background: #f4efe3; color: #0d1f17; }
 .bc-status.final .small { color: #4a5a50; }
+
+/* Leaderboard standings: Cup scoreboard */
+.cup {
+  background: #0d1f17; color: #f4efe3; border-radius: var(--radius); overflow: hidden;
+  box-shadow: var(--shadow); margin-top: 12px;
+}
+.cup-head {
+  display: flex; justify-content: space-between; align-items: baseline; padding: 12px 14px 8px;
+  font: 700 15px Oswald, sans-serif; letter-spacing: .1em; text-transform: uppercase;
+}
+.cup-head span:last-child { font: 600 10px Inter, sans-serif; letter-spacing: .1em; color: #9fb5a9; }
+.cup-row {
+  display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 10px;
+  padding: 10px 14px; border-top: 1px solid #24463a; border-left: 5px solid var(--c);
+}
+.cup-row.lead { background: var(--c); }
+.cup-row.winner { box-shadow: inset 0 0 0 2px #d9ad4a; }
+.cup-rank { font: 700 20px Oswald, sans-serif; text-align: center; color: #9fb5a9; }
+.cup-row.lead .cup-rank { color: #fff; }
+.cup-team { min-width: 0; }
+.cup-name { font: 700 18px Oswald, sans-serif; text-transform: uppercase; letter-spacing: .04em; line-height: 1.1; }
+.cup-players { font-size: 12px; opacity: .75; margin-top: 1px; }
+.cup-bar { position: relative; height: 5px; border-radius: 99px; background: rgba(255, 255, 255, .12); margin-top: 7px; overflow: hidden; }
+.cup-bar span { position: absolute; inset: 0 auto 0 0; border-radius: 99px; background: var(--c); }
+.cup-row.lead .cup-bar span { background: #fff; }
+.cup-bar .proj { background: rgba(255, 255, 255, .35) !important; }
+.cup-pts { font: 700 34px Oswald, sans-serif; line-height: 1; text-align: right; min-width: 44px; }
+.cup-live { font: 700 10px Inter, sans-serif; letter-spacing: .06em; text-transform: uppercase; color: #ffd873; margin-top: 3px; }
+.cup-tb { font-size: 11px; font-weight: 600; color: #ffd873; margin-top: 4px; }

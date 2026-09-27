@@ -42,6 +42,8 @@ const playerName = (id) => (id?.startsWith(GUEST) ? id.slice(GUEST.length) : PLA
 const isPlayer = () => PLAYERS.some((p) => p.id === ui.me);
 const teamOf = (config, pid) => config.teams.findIndex((t) => t.players.includes(pid));
 const teamColor = (idx) => TEAM_COLORS[idx % TEAM_COLORS.length];
+// Points with a ½ glyph, like a Cup scoreboard: 7.5 -> 7½.
+const fmtHalf = (n) => (Number.isInteger(n) ? String(n) : `${Math.floor(n) || ''}½`);
 const fmtPts = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, ''));
 const sideLabel = (side) => side.players.map(playerName).join(' & ');
 
@@ -335,22 +337,29 @@ function renderBoard() {
   }
   const showTiebreaks = !!panel;
 
+  // Cup scoreboard: big points, team colors, the leader lit up, and a bar
+  // toward the most points a team can win over the trip.
+  const maxPts = enabledRounds(config).length * 3;
+  const leaderPts = Math.max(...ranked.map((r) => r.points));
   const teamRows = ranked.map((r, i) => {
     const t = standings.teams[r.idx];
     const rank = i > 0 && ranked[i - 1].rank === r.rank ? '' : r.rank;
-    const live = t.projected !== t.points
-      ? `<div class="live-pts">${fmtPts(t.projected)} if all live matches ended now</div>` : '';
-    const tb = !showTiebreaks ? '' : r.unresolved ? '<div class="tiebreak">Tied on every tiebreaker</div>'
-      : r.tiebreak ? `<div class="tiebreak">Placed on tiebreaker: ${esc(r.tiebreak)}</div>` : '';
+    const swing = t.projected - t.points;
+    const live = swing > 0 ? `<div class="cup-live">+${fmtHalf(swing)} live</div>` : '';
+    const tb = !showTiebreaks ? '' : r.unresolved ? '<div class="cup-tb">Tied on every tiebreaker</div>'
+      : r.tiebreak ? `<div class="cup-tb">Placed on tiebreaker: ${esc(r.tiebreak)}</div>` : '';
     const winner = allFinal && i === 0 && !r.unresolved;
-    return `<div class="team-row ${winner ? 'winner' : ''}" style="--team:${teamColor(t.idx)}">
-      <div class="rank">${winner ? '🏆' : rank}</div>
-      <div class="team-info">
-        <div class="team-name">${esc(t.name)}</div>
-        <div class="team-players">${t.players.map(playerName).join(' & ')} · ${t.w}-${t.l}-${t.h}</div>
-        ${live}${tb}
+    const lead = winner || (!allFinal && t.points > 0 && t.points === leaderPts);
+    const pct = (n) => `${Math.min(100, (n / maxPts) * 100)}%`;
+    return `<div class="cup-row ${lead ? 'lead' : ''} ${winner ? 'winner' : ''}" style="--c:${teamColor(t.idx)}">
+      <div class="cup-rank">${winner ? '🏆' : rank}</div>
+      <div class="cup-team">
+        <div class="cup-name">${esc(t.name)}</div>
+        <div class="cup-players">${t.players.map(playerName).join(' & ')} · ${t.w}-${t.l}-${t.h}</div>
+        <div class="cup-bar"><span class="proj" style="width:${pct(t.projected)}"></span><span style="width:${pct(t.points)}"></span></div>
+        ${tb}
       </div>
-      <div class="big-pts">${fmtPts(t.points)}</div>
+      <div class="cup-pts">${fmtHalf(t.points)}${live}</div>
     </div>`;
   }).join('');
 
@@ -378,9 +387,10 @@ function renderBoard() {
   return `
     ${champBanner}
     <section>
-      <h2>Team Standings</h2>
-      <div class="card teams">${teamRows}</div>
-      <p class="note">Win = 1 · Tie = ½ · Loss = 0 &nbsp;·&nbsp; 3 pts per team up for grabs each day</p>
+      <div class="cup">
+        <div class="cup-head"><span>Team Standings</span><span>${maxPts} pts per team in play</span></div>
+        ${teamRows}
+      </div>
       ${panel}
       <div class="info-toggles">
         <button class="info-btn ${ui.info === 'format' ? 'on' : ''}" data-action="info" data-id="format">Format ${ui.info === 'format' ? '▴' : '▾'}</button>
