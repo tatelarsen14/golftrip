@@ -584,3 +584,24 @@ label.btn.disabled { opacity: .4; }
 }
 .view-toggle button { border: 0; background: none; border-radius: 9px; padding: 9px 6px; font-weight: 700; font-size: 14px; color: var(--muted); }
 .view-toggle button.on { background: var(--paper); color: var(--forest); box-shadow: var(--shadow); }
+
+/* Birdie Board podium */
+.bb-empty { text-align: center; color: var(--muted); }
+.podium { display: flex; justify-content: center; align-items: flex-end; gap: 8px; padding: 6px 0 12px; }
+.pod { flex: 1; max-width: 110px; text-align: center; }
+.pod-medal { font-size: 26px; line-height: 1; }
+.pod-name { font: 700 15px Oswald, sans-serif; text-transform: uppercase; letter-spacing: .03em; margin: 4px 0; }
+.pod-block {
+  background: var(--c); color: #fff; border-radius: 8px 8px 0 0; display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 8px; font: 700 28px Oswald, sans-serif;
+}
+.pod.r1 .pod-block { height: 92px; }
+.pod.r2 .pod-block { height: 70px; }
+.pod.r3 .pod-block { height: 54px; }
+.bb-row { display: grid; grid-template-columns: 22px 92px 1fr 26px; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.bb-rank { color: var(--muted); font-weight: 600; text-align: center; }
+.bb-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bb-bar { height: 8px; background: var(--cream); border-radius: 99px; overflow: hidden; }
+.bb-bar span { display: block; height: 100%; border-radius: 99px; }
+.bb-row b { text-align: right; }
+.bb-zero { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 8px; margin-top: 2px; }

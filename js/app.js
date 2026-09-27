@@ -373,6 +373,39 @@ function yourMatchCard(config, standings) {
   </div>`;
 }
 
+// Birdie Board: podium for the top 3, bars for everyone else with a birdie,
+// and one line for whoever's still waiting on their first.
+function birdieBoard(config, birdies) {
+  const withBirdies = birdies.filter((b) => b.birdies > 0);
+  if (!withBirdies.length) {
+    return '<div class="card bb-empty">No birdies yet. The first one gets a shoutout in the Feed 🐦</div>';
+  }
+  const rankOf = (b) => 1 + birdies.filter((o) => o.birdies > b.birdies).length;
+  const medal = (r) => ['🥇', '🥈', '🥉'][r - 1] || '';
+  const max = withBirdies[0].birdies;
+  const podium = withBirdies.slice(0, 3);
+  const order = podium.length === 3 ? [podium[1], podium[0], podium[2]] : podium; // 2nd, 1st, 3rd
+  const rest = withBirdies.slice(3);
+  const zeros = birdies.filter((b) => b.birdies === 0);
+  return `<div class="card bb-card">
+    <div class="podium n${podium.length}">${order.map((b) => {
+      const r = rankOf(b);
+      return `<div class="pod r${Math.min(r, 3)}" style="--c:${teamColor(teamOf(config, b.id))}">
+        <div class="pod-medal">${medal(r)}</div>
+        <div class="pod-name">${esc(playerName(b.id))}</div>
+        <div class="pod-block"><span>${b.birdies}</span></div>
+      </div>`;
+    }).join('')}</div>
+    ${rest.map((b) => `<div class="bb-row">
+      <span class="bb-rank">${rankOf(b)}</span>
+      <span class="bb-name">${teamDot(teamOf(config, b.id))} ${esc(playerName(b.id))}</span>
+      <span class="bb-bar"><span style="width:${(b.birdies / max) * 100}%;background:${teamColor(teamOf(config, b.id))}"></span></span>
+      <b>${b.birdies}</b>
+    </div>`).join('')}
+    ${zeros.length ? `<div class="bb-zero">Still hunting: ${zeros.map((b) => esc(playerName(b.id))).join(', ')}</div>` : ''}
+  </div>`;
+}
+
 // ---------- Leaderboard ----------
 
 function renderBoard() {
@@ -482,16 +515,7 @@ function renderBoard() {
     </section>
     <section>
       <h2>Birdie Board 🐦</h2>
-      <div class="card">
-        <table class="table">
-          <thead><tr><th></th><th>Player</th><th class="num">Birdies</th></tr></thead>
-          <tbody>${birdies.map((b, i) => `
-            <tr><td class="muted">${i + 1}</td><td>${teamDot(teamOf(config, b.id))} ${esc(playerName(b.id))}</td>
-            <td class="num"><b>${b.birdies}</b></td></tr>`).join('')}
-          </tbody>
-        </table>
-      </div>
-      <p class="note">Every hole of every tournament round counts, both nines. An eagle counts as a birdie.</p>
+      ${birdieBoard(config, birdies)}
     </section>`;
 }
 
