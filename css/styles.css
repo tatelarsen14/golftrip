@@ -576,3 +576,11 @@ label.btn.disabled { opacity: .4; }
 /* Scores tab: live match under the entry card */
 .bc-mini { margin-top: 12px; padding-top: 2px; }
 .bc-mini .bc-session { margin-top: 10px; }
+
+/* Scores tab: Enter / Scorecards toggle */
+.view-toggle {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; margin-bottom: 10px;
+  background: #e6dfcd; border-radius: 12px;
+}
+.view-toggle button { border: 0; background: none; border-radius: 9px; padding: 9px 6px; font-weight: 700; font-size: 14px; color: var(--muted); }
+.view-toggle button.on { background: var(--paper); color: var(--forest); box-shadow: var(--shadow); }

@@ -497,7 +497,17 @@ function renderBoard() {
 
 // ---------- Score entry ----------
 
+// Scores tab: enter scores hole by hole, or flip to the scorecards.
 function renderScores() {
+  const card = ui.scoresView === 'card';
+  const toggle = `<div class="view-toggle">
+    <button class="${card ? '' : 'on'}" data-action="scores-view" data-id="enter">✏️ Enter scores</button>
+    <button class="${card ? 'on' : ''}" data-action="scores-view" data-id="card">📋 Scorecards</button>
+  </div>`;
+  return toggle + (card ? renderCards() : renderEntry());
+}
+
+function renderEntry() {
   const config = view;
   const { scores } = store;
   const round = currentRound();
@@ -1089,7 +1099,6 @@ function namePicker() {
 const TABS = [
   ['board', '🏆', 'Leaderboard', renderBoard],
   ['scores', '✏️', 'Scores', renderScores],
-  ['cards', '📋', 'Cards', renderCards],
   ['feed', '💬', 'Feed', renderFeed],
   ['trip', '🗺️', 'Trip', renderTrip],
   ['setup', '⚙️', 'Setup', renderSetup],
@@ -1107,6 +1116,10 @@ function render() {
   }
   renderQueued = false;
   view = resolveConfig(store.config, store.scores);
+  if (ui.tab === 'cards') { // Cards moved into Scores
+    ui.tab = 'scores';
+    ui.scoresView = 'card';
+  }
   const tabs = TABS.filter(([id]) => id !== 'setup' || isAdmin());
   const tab = [...tabs, ...HIDDEN_TABS].find((t) => t[0] === ui.tab) || tabs[0];
   // Keep the cursor in whatever box the person is typing in.
@@ -1219,12 +1232,16 @@ app.addEventListener('click', async (e) => {
       // Jump to the first hole this player hasn't scored yet in that round.
       const sc = store.scores[el.dataset.round]?.[ui.me] || {};
       ui.tab = 'scores';
+      ui.scoresView = 'enter';
       ui.roundId = el.dataset.round;
       ui.group = Number(el.dataset.group);
       ui.hole = [...FRONT_NINE, ...BACK_NINE].find((h) => !sc[h]) || 18;
       window.scrollTo(0, 0);
       break;
     }
+    case 'scores-view':
+      ui.scoresView = el.dataset.id;
+      break;
     case 'info':
       ui.info = ui.info === el.dataset.id ? null : el.dataset.id;
       break;
