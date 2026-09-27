@@ -1018,16 +1018,19 @@ function render() {
   const active = document.activeElement;
   const focusId = app.contains(active) ? active.id : '';
   const sel = focusId && typeof active.selectionStart === 'number' ? [active.selectionStart, active.selectionEnd] : null;
+  // Sync state as a dot on the name chip; words only when something's off.
   const sync = store.mode === 'firebase'
-    ? (store.online ? '<span class="sync on">● Live</span>' : '<span class="sync off">● Offline — will sync</span>')
-    : '<span class="sync local">● This device only</span>';
+    ? (store.online ? '<span class="sync on" title="Live: syncing with everyone"></span>'
+      : '<span class="sync off" title="Offline: scores save and sync later"></span><span class="sync-label">Offline</span>')
+    : '<span class="sync local" title="Scores only on this device"></span><span class="sync-label">Local</span>';
+  const who = ui.me ? `${esc(playerName(ui.me))}${isPlayer() ? '' : ' 👀'}` : 'Pick name';
   const scrollY = window.scrollY;
   const keepScroll = app.dataset.tab === tab[0];
   app.dataset.tab = tab[0];
   app.innerHTML = `
     <header class="top">
-      <div><h1>${esc(TRIP.title)}</h1><button class="sub" data-action="change-me">Buckle Up · ${ui.me ? `${esc(playerName(ui.me))}${isPlayer() ? '' : ' (spectator)'} ▾` : 'Pick your name ▾'}</button></div>
-      ${sync}
+      <div class="brand"><div class="wordmark">Buckle Up</div><div class="tagline">${esc(TRIP.short)} · ${esc(TRIP.shortDates)}</div></div>
+      <button class="me-chip" data-action="change-me" aria-label="Change name">${sync}<span>${who}</span><span class="caret">▾</span></button>
     </header>
     <main>${tab[3]()}</main>
     <nav class="tabs" style="--n:${tabs.length}">${tabs.map(([id, icon, label]) => `

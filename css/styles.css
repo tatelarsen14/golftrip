@@ -37,17 +37,21 @@ code { font-size: .9em; background: var(--cream); padding: 1px 4px; border-radiu
   background: var(--forest);
   color: var(--cream);
 }
-.top h1 {
-  margin: 0; font: 700 18px/1.1 Oswald, sans-serif; letter-spacing: .03em; text-transform: uppercase;
+.brand { min-width: 0; }
+.wordmark { font: 700 24px/1 Oswald, sans-serif; letter-spacing: .12em; text-transform: uppercase; }
+.tagline { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: #d9ad4a; margin-top: 3px; }
+.me-chip {
+  display: inline-flex; align-items: center; gap: 7px; max-width: 55%;
+  background: rgba(255, 255, 255, .1); border: 1px solid rgba(255, 255, 255, .18); color: var(--cream);
+  border-radius: 99px; padding: 6px 12px; font-weight: 600; font-size: 14px;
 }
-.top .sub {
-  font-size: 12px; opacity: .8; letter-spacing: .08em; text-transform: uppercase;
-  background: none; border: 0; color: inherit; padding: 2px 0; text-align: left;
-}
-.sync { font-size: 12px; white-space: nowrap; }
-.sync.on { color: #8fe0ad; }
-.sync.off { color: #ffcf70; }
-.sync.local { color: #f3c4a0; }
+.me-chip > span:not(.sync):not(.caret) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.me-chip .caret { font-size: 10px; opacity: .7; }
+.sync { flex: 0 0 8px; width: 8px; height: 8px; border-radius: 50%; }
+.sync.on { background: #5fd68d; box-shadow: 0 0 0 3px rgba(95, 214, 141, .25); }
+.sync.off { background: #ffcf70; }
+.sync.local { background: #f3c4a0; }
+.sync-label { font-size: 11px; color: #ffcf70; text-transform: uppercase; letter-spacing: .06em; }
 
 main {
   max-width: 640px; margin: 0 auto;

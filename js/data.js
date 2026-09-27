@@ -5,6 +5,8 @@ export const TRIP = {
   title: 'Washington / Idaho Golf Trip',
   dates: 'October 2 – 6, 2026',
   tagline: 'Same Crew · Different Fairways',
+  short: 'WA / ID',
+  shortDates: 'Oct 2–6',
 };
 
 export const PLAYERS = [
