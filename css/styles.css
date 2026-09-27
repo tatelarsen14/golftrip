@@ -572,3 +572,7 @@ label.btn.disabled { opacity: .4; }
 .yours-body .bc-match { margin-bottom: 10px; }
 .yours-go { width: 100%; background: #d9ad4a; color: #0d1f17; }
 .countdown .yours-title { font-size: 26px; }
+
+/* Scores tab: live match under the entry card */
+.bc-mini { margin-top: 12px; padding-top: 2px; }
+.bc-mini .bc-session { margin-top: 10px; }

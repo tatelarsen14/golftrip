@@ -1,5 +1,5 @@
 import { createStore, MAX_VIDEO_MB } from './store.js';
-import { PLAYERS, TEAM_COLORS, TRIP, ITINERARY, FLIGHTS, MATCHUPS } from './data.js';
+import { PLAYERS, TEAM_COLORS, TRIP, ITINERARY, FLIGHTS, MATCHUPS, HOLE_HANDICAPS } from './data.js';
 import {
   buildMatches, computeMatch, computeStandings, birdieCounts, parFor, scoreMark, rankTeams, resolveConfig,
   TIEBREAKERS, FRONT_NINE, BACK_NINE, puttoffKey,
@@ -18,6 +18,7 @@ const drafts = {}; // unsent text in the composer and comment boxes, by field
 let pendingMedia = []; // photos/videos picked for the next post: { file, url, type }
 let posting = null; // { done, total, frac } while a post uploads
 let renderQueued = false;
+let advanceTimer = null; // moves to the next hole once everyone in the group has a score
 const ui = loadUI();
 
 // ---------- helpers ----------
@@ -555,7 +556,7 @@ function renderScores() {
     <div class="card entry">
       <div class="entry-head">
         <div><div class="hole-num">Hole ${hole}</div>
-        <div class="hole-par">Par ${par ?? '–'}</div>
+        <div class="hole-par">Par ${par ?? '–'}${HOLE_HANDICAPS[round.id] ? ` · Hcp ${HOLE_HANDICAPS[round.id][hole - 1]}` : ''}</div>
         <div class="muted">${isFront ? 'Best Ball — low score on each team counts' : 'Singles match play'}</div></div>
         <span class="badge ${isFront ? 'bb' : 'sg'}">${isFront ? 'Best Ball' : 'Singles'}</span>
       </div>
@@ -567,8 +568,10 @@ function renderScores() {
         <button class="btn" data-action="hole" data-hole="${Math.min(18, hole + 1)}" ${hole === 18 ? 'disabled' : ''}>Hole ${hole < 18 ? hole + 1 : ''} →</button>
       </div>
     </div>
-    <h3>${isFront ? 'Best ball match' : 'Singles matches'}</h3>
-    ${segmentMatches.map((m) => matchCard(m, computeMatch(m, roundScores), { compact: true })).join('')}`;
+    <div class="bc-wrap bc-mini">
+      <div class="bc-session"><span>${isFront ? 'Best ball match' : 'Singles matches'}</span><span>${groupTitle(round, ui.group)}</span></div>
+      ${segmentMatches.map((m) => broadcastCard(config, m, computeMatch(m, roundScores))).join('')}
+    </div>`;
 }
 
 // ---------- Scorecards ----------
@@ -743,6 +746,33 @@ function renderSetup() {
         ? `<p>✅ <b>Live sync is on.</b> Scores appear on everyone's phone instantly and are saved offline if you lose signal.</p>`
         : `<p>⚠️ <b>Local mode.</b> Scores are only saved on this device.</p>`}
     </div>`;
+}
+
+// True when every player in the current group has a score on the hole.
+function groupHoleComplete(round, hole) {
+  const group = view.rounds.find((r) => r.id === round.id)?.groups[ui.group];
+  if (!group) return false;
+  return group.teams.every((t) => view.teams[t].players.every((p) => store.scores[round.id]?.[p]?.[hole]));
+}
+
+// When the last score on a hole goes in, move to the next hole after a
+// moment. Fixing a score during that moment restarts the wait; going back to
+// fix an older hole never jumps you forward.
+let advancePending = null; // hole waiting to auto-advance
+function scheduleAdvance(round, wasComplete) {
+  clearTimeout(advanceTimer);
+  const hole = ui.hole;
+  const justFinished = !wasComplete && groupHoleComplete(round, hole);
+  if (!justFinished && advancePending !== hole) return;
+  if (hole >= 18 || !groupHoleComplete(round, hole)) { advancePending = null; return; }
+  advancePending = hole;
+  advanceTimer = setTimeout(() => {
+    advancePending = null;
+    if (ui.tab !== 'scores' || ui.hole !== hole || ui.roundId !== round.id) return;
+    ui.hole = hole + 1;
+    toast(`Hole ${hole} done → Hole ${hole + 1}`);
+    render();
+  }, 1500);
 }
 
 // Apply a Setup change and save it for everyone immediately.
@@ -1137,6 +1167,8 @@ app.addEventListener('click', async (e) => {
       ui.group = Number(el.dataset.group);
       break;
     case 'hole':
+      clearTimeout(advanceTimer);
+      advancePending = null;
       ui.hole = Number(el.dataset.hole);
       break;
     case 'step': {
@@ -1147,11 +1179,15 @@ app.addEventListener('click', async (e) => {
       // First tap starts at par; triple bogey is the max.
       const par = parFor(store.config, round.id, ui.hole) || 4;
       const next = cur ? Math.min(par + MAX_OVER_PAR, Math.max(1, cur + delta)) : par;
+      const before = groupHoleComplete(round, ui.hole);
       store.setScore(round.id, el.dataset.player, ui.hole, next).catch(showError);
+      scheduleAdvance(round, before);
       return;
     }
     case 'clear':
       if (!isPlayer()) return;
+      clearTimeout(advanceTimer);
+      advancePending = null;
       store.setScore(round.id, el.dataset.player, ui.hole, null).catch(showError);
       return;
     case 'set-me':
