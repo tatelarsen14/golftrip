@@ -11,15 +11,28 @@ Every round:
 | Front 9 | **Best ball** match play, team vs team (each player enters their own score, low score on the team counts) | 1 per match |
 | Back 9 | **Singles** match play, 1 v 1 within the same group | 1 per match |
 
-Win = 1, tie = ½, loss = 0. Each team has 3 points up for grabs per day.
+Win = 1, tie = ½, loss = 0. Each team has 3 points up for grabs per day Sat–Mon.
 Tournament rounds are Sat–Tue; Friday's round is just for fun and isn't tracked.
-Sat–Mon groups rotate so every team plays every other team once. Tuesday is
-seeded: once every Sat–Mon match is final, 1st plays 2nd and 3rd plays 4th
-(shown as TBD until then).
+Sat–Mon groups rotate so every team plays every other team once.
+
+### Tuesday: Bracket Day
+
+All singles. Once every Sat–Mon match is final, teams are seeded 1–4 and each
+team puts one player in **Bracket A** (9:20 group) and the other in **Bracket B**
+(9:30 group), picked on the Leaderboard in order: 4th seed first, 1st seed last.
+
+| | Matches (each bracket) | Win | Tie |
+|---|---|---|---|
+| Front 9: Semifinals | 1 v 4, 2 v 3 | 1 | ½ each, higher seed advances |
+| Back 9: Final | semi winners | 2 | 1 each |
+| Back 9: 3rd place | semi losers | 1 | ½ each |
+
+That's 10 points on Tuesday (up to 6 for one team), 15 max per team over the trip.
+Tate can reset the picks in Setup.
 
 ### Tiebreakers
 
-Used for Tuesday's seeding and for the final standings when teams are level on points:
+Used for Tuesday's seeds and for the final standings when teams are level on points:
 
 1. Head-to-head points (only matches between the tied teams)
 2. Most matches won

@@ -654,3 +654,19 @@ label.btn.disabled { opacity: .4; }
 @keyframes wb-fade { from { opacity: 0; } to { opacity: 1; } }
 .highlight.ace { border-left-color: #b8860b; background: #fbf0d4; }
 .highlight.ace .hl-title { font-size: 17px; }
+
+/* Bracket Day */
+.bracket-picks { margin-top: 12px; border: 2px solid #d9ad4a; }
+.bracket-picks > p { font-size: 13px; margin: 4px 0 8px; }
+.bp-row { border-left: 5px solid var(--c); padding: 8px 10px; border-radius: 8px; background: var(--cream); margin-top: 6px; }
+.bp-row.turn { background: #fbf0d4; box-shadow: inset 0 0 0 1px #d9ad4a; }
+.bp-team { font-weight: 700; }
+.bp-team small { display: block; font-weight: 400; font-size: 12px; color: var(--muted); }
+.bp-seed { font: 700 13px Oswald, sans-serif; color: var(--muted); margin-right: 2px; }
+.bp-picked { display: flex; gap: 14px; margin-top: 4px; font-size: 14px; }
+.bp-picked b { display: inline-block; width: 18px; height: 18px; border-radius: 4px; background: var(--forest); color: var(--cream); text-align: center; font-size: 11px; line-height: 18px; margin-right: 4px; }
+.bp-choose { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+.bp-choose button { border: 1px solid var(--forest); background: var(--paper); border-radius: 10px; padding: 8px 6px; font-weight: 700; color: var(--forest); }
+.bp-choose small { display: block; font-weight: 500; font-size: 11px; color: var(--muted); }
+.bp-wait { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.bc-next { font-size: 12px; color: #9fb5a9; text-align: center; padding: 6px 4px 10px; }

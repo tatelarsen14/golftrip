@@ -22,6 +22,7 @@ function withDefaults(saved) {
   const config = structuredClone(DEFAULT_CONFIG);
   if (saved?.teams) config.teams = saved.teams;
   config.puttoffs = saved?.puttoffs || {};
+  config.bracketPicks = saved?.bracketPicks || {};
   if (saved?.rounds) {
     config.rounds = saved.rounds
       .filter((r) => r.id !== 'fri') // Friday was dropped after launch
@@ -30,8 +31,8 @@ function withDefaults(saved) {
   return config;
 }
 
-// Only teams, pairings and putt-off results are saved; pars are fixed.
-const setupFields = ({ teams, rounds, puttoffs = {} }) => JSON.parse(JSON.stringify({ teams, rounds, puttoffs }));
+// Only teams, pairings, putt-offs and bracket picks are saved; pars are fixed.
+const setupFields = ({ teams, rounds, puttoffs = {}, bracketPicks = {} }) => JSON.parse(JSON.stringify({ teams, rounds, puttoffs, bracketPicks }));
 
 const newId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 

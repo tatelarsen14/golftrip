@@ -4,6 +4,7 @@ import {
   buildMatches, computeMatch, computeStandings, birdieCounts, parFor, scoreMark, rankTeams, resolveConfig,
   TIEBREAKERS, FRONT_NINE, BACK_NINE, puttoffKey,
   matchStreak, birdieStreak, highlights, longestBirdieRun, longestMatchRun, roundTotals,
+  BRACKETS, BRACKET_POINTS,
 } from './scoring.js';
 
 const UI_KEY = 'golftrip:ui';
@@ -102,22 +103,85 @@ function currentRound() {
 }
 
 function groupLabel(config, group) {
+  if (group.players) return group.players.map((p) => esc(playerName(p))).join(' · ');
   return group.teams.map((t) => esc(config.teams[t]?.name)).join(' vs ');
 }
 
 function groupTitle(round, gi) {
+  if (round.format === 'bracket') return `Bracket ${round.groups[gi]?.bracket || BRACKETS[gi]}`;
   if (round.seeded) return gi === 0 ? '1st v 2nd' : '3rd v 4th';
   return `Group ${gi + 1}`;
+}
+
+// Everyone in a tee group: a bracket lists its four players (one per team),
+// otherwise it's both teams' pairs.
+function groupPlayers(config, group) {
+  if (group.players) return group.players.map((p, i) => ({ id: p, team: group.teams[i] }));
+  return group.teams.flatMap((t) => config.teams[t].players.map((p) => ({ id: p, team: t })));
+}
+
+const inGroup = (config, group, pid) => groupPlayers(config, group).some((p) => p.id === pid);
+
+// Most points one team can win in a round: 3 normally, 6 on Bracket Day.
+const roundMaxPoints = (r) => (r.format === 'bracket'
+  ? BRACKET_POINTS.semi + BRACKET_POINTS.final + BRACKET_POINTS.semi + BRACKET_POINTS.final : 3);
+
+// Bracket Day picks: each team puts one player in Bracket A and the other in
+// Bracket B, in order from the 4th seed up to the 1st. Either player on the
+// team (or Tate) makes the pick when it's their turn.
+function bracketPicksCard(config, round) {
+  const picks = config.bracketPicks || {};
+  const order = [...round.seeds].reverse();
+  const seedOf = (t) => round.seeds.indexOf(t) + 1;
+  const canPick = (t) => ui.me === ORGANIZER || (isPlayer() && teamOf(config, ui.me) === t);
+  const rows = order.map((t) => {
+    const team = config.teams[t];
+    const [p1, p2] = team.players;
+    const picked = team.players.includes(picks[t]) ? picks[t] : null;
+    let body;
+    if (picked) {
+      const other = team.players.find((p) => p !== picked);
+      body = `<div class="bp-picked"><span><b>A</b> ${esc(playerName(picked))}</span><span><b>B</b> ${esc(playerName(other))}</span></div>`;
+    } else if (t === round.pickTurn && canPick(t)) {
+      body = `<div class="bp-choose">
+        <button data-action="bracket-pick" data-team="${t}" data-player="${p1}">${esc(playerName(p1))} → A<small>${esc(playerName(p2))} → B</small></button>
+        <button data-action="bracket-pick" data-team="${t}" data-player="${p2}">${esc(playerName(p2))} → A<small>${esc(playerName(p1))} → B</small></button>
+      </div>`;
+    } else if (t === round.pickTurn) {
+      body = '<div class="bp-wait">Picking now…</div>';
+    } else {
+      body = '<div class="bp-wait">Waiting</div>';
+    }
+    return `<div class="bp-row ${t === round.pickTurn ? 'turn' : ''}" style="--c:${teamColor(t)}">
+      <div class="bp-team"><span class="bp-seed">#${seedOf(t)}</span> ${esc(team.name)}<small>${team.players.map(playerName).join(' & ')}</small></div>
+      ${body}
+    </div>`;
+  }).join('');
+  return `<div class="card bracket-picks">
+    <div class="tbd-title">🎯 Bracket Day picks</div>
+    <p class="muted">Each team puts one player in <b>Bracket A</b> (${esc(round.tees?.[0] || '')}) and one in <b>Bracket B</b> (${esc(round.tees?.[1] || '')}).
+      4th seed picks first, 1st picks last. Semis in both brackets: <b>1 v 4</b> and <b>2 v 3</b>.</p>
+    ${rows}
+  </div>`;
 }
 
 // Shown in place of a seeded round's matches until Sat-Mon are all final.
 function pendingNote(config, round) {
   const ifNow = round.seeding.map(([a, b]) => `${esc(config.teams[a].name)} v ${esc(config.teams[b].name)}`).join(' · ');
+  if (round.needsPicks) return bracketPicksCard(config, round);
   if (round.needsPuttoff) {
     return `<div class="card tbd">
       <div class="tbd-title">Putt-off needed</div>
-      <p>Teams are dead even for 2nd and 3rd after every tiebreaker. Play the putt-off and record the winner
+      <p>Teams are dead even for a seed after every tiebreaker. Play the putt-off and record the winner
         on the Leaderboard; the matchups are set right after.</p>
+    </div>`;
+  }
+  if (round.format === 'bracket') {
+    return `<div class="card tbd">
+      <div class="tbd-title">Bracket Day · TBD</div>
+      <p>Seeds are set when every earlier match is final. Then each team picks its <b>Bracket A</b> and <b>Bracket B</b>
+        player (4th seed first), and the semis are <b>1 v 4</b> and <b>2 v 3</b>.</p>
+      <p class="muted">If it ended now: ${ifNow}</p>
     </div>`;
   }
   return `<div class="card tbd">
@@ -193,6 +257,8 @@ function fmtTieValue(key, v) {
 // A putt-off only matters if the still-tied teams straddle a spot that
 // counts: 2nd/3rd for the seeding, 1st for the title.
 function puttoffMatters(ranked, teams, stage) {
+  // Every seed matters for a bracket (1 v 4, 2 v 3).
+  if (stage === 'seed' && enabledRounds(view).find((r) => r.seeded)?.format === 'bracket') return true;
   const top = Math.min(...ranked.filter((t) => teams.includes(t.idx)).map((t) => ranked.indexOf(t) + 1));
   const bottom = top + teams.length - 1;
   return stage === 'seed' ? top <= 2 && bottom >= 3 : top === 1;
@@ -263,14 +329,19 @@ function formatInfo(config) {
   const unseeded = rounds.filter((r) => !r.seeded).map((r) => r.day.split(' ')[0]);
   return `<div class="info-panel">
     <p><b>Teams:</b> ${config.teams.length} teams of 2. Everything is match play, straight up (no handicaps).</p>
-    <p><b>Every round</b> (${rounds.map((r) => r.day.split(' ')[0]).join(', ')}), each group of two teams plays:</p>
+    <p><b>${rounds.filter((r) => r.format !== 'bracket').map((r) => r.day.split(' ')[0]).join(', ')}</b>: each group of two teams plays:</p>
     <ul>
       <li><b>Front 9: Best ball.</b> Team vs team. Everyone plays their own ball and enters their own score; the lower score on each team is the team's score for the hole.</li>
       <li><b>Back 9: Singles.</b> Two 1-on-1 matches between the players in the group.</li>
     </ul>
     <p><b>Winning a match:</b> the lower score wins the hole; same score halves it. Whoever wins more holes wins the match. It ends early once one side is up by more holes than are left (e.g. <i>Won 3&2</i> = 3 up with 2 to play).</p>
-    <p><b>Points:</b> Win = 1 · Tie = ½ · Loss = 0. Each team can win 3 points a day (best ball + both singles), ${rounds.length * 3} over the trip. Most points at the end wins.</p>
-    <p><b>Matchups:</b> ${unseeded.join(', ')}: groups rotate so every team plays every other team once.${seeded ? ` ${seeded.day.split(' ')[0]}: seeded from the standings, 1st v 2nd and 3rd v 4th (TBD until the earlier rounds are final).` : ''}</p>
+    <p><b>Points:</b> Win = 1 · Tie = ½ · Loss = 0. Each team can win 3 points a day (best ball + both singles). Most points at the end wins (${rounds.reduce((a, r) => a + roundMaxPoints(r), 0)} max per team).</p>
+    <p><b>Matchups:</b> ${unseeded.join(', ')}: groups rotate so every team plays every other team once.${seeded && seeded.format !== 'bracket' ? ` ${seeded.day.split(' ')[0]}: seeded from the standings, 1st v 2nd and 3rd v 4th (TBD until the earlier rounds are final).` : ''}</p>
+    ${seeded?.format === 'bracket' ? `<p><b>${seeded.day.split(' ')[0]}: Bracket Day.</b> All singles. Teams are seeded 1–4 from the standings and each team puts one player in <b>Bracket A</b> and one in <b>Bracket B</b> (4th seed picks first, 1st last).</p>
+    <ul>
+      <li><b>Front 9: Semis.</b> 1 v 4 and 2 v 3 in each bracket. Win = 1, tie = ½ each and the higher seed advances.</li>
+      <li><b>Back 9: Final</b> (semi winners) worth <b>${BRACKET_POINTS.final}</b>, tie = 1 each. <b>3rd place</b> (semi losers) worth 1, tie = ½ each.</li>
+    </ul>` : ''}
     <p><b>Max score:</b> triple bogey (par + 3) on every hole.</p>
     <p><b>Reading a match:</b> <i>2 UP thru 6</i> = leading by 2 holes after 6. <i>All square</i> = tied. <i>Dormie</i> = up by exactly the holes left, so the other side can only tie.</p>
     <p><b>Side game:</b> the Birdie Board counts everyone's birdies (eagles count as birdies).</p>
@@ -282,7 +353,7 @@ function formatInfo(config) {
 // strip above shows who won each hole.
 function broadcastCard(config, match, res) {
   const color = (si) => teamColor(match.sides[si].team);
-  const kind = match.type === 'bestball' ? 'Best Ball · Front 9' : 'Singles · Back 9';
+  const kind = match.label || (match.type === 'bestball' ? 'Best Ball · Front 9' : 'Singles · Back 9');
   const streak = !res.done ? matchStreak(res) : null;
   const side = (si) => {
     const s = match.sides[si];
@@ -327,7 +398,7 @@ function yourMatchCard(config, standings) {
   const daysUntil = (date) => Math.round((new Date(`${date}T00:00`) - new Date(`${today}T00:00`)) / 86400000);
   const me = isPlayer() ? ui.me : null;
   const myTeam = me ? teamOf(config, me) : -1;
-  const myGroup = (r) => (r.pending ? -1 : r.groups.findIndex((g) => g.teams.includes(myTeam)));
+  const myGroup = (r) => (r.pending ? -1 : r.groups.findIndex((g) => inGroup(config, g, me)));
   const dayName = (r) => esc(r.day.split(' ')[0]);
   const todayRound = rounds.find((r) => r.date === today);
 
@@ -342,6 +413,11 @@ function yourMatchCard(config, standings) {
     const current = mine.find((m) => !m.result.done);
     const tee = todayRound.tees?.[gi];
     const go = `<button class="btn yours-go" data-action="go-scores" data-round="${todayRound.id}" data-group="${gi}">Enter scores →</button>`;
+    if (!current && todayRound.groups[gi].bracket && !todayRound.groups[gi].final) {
+      return `<div class="yours card"><div class="yours-kicker">Bracket ${todayRound.groups[gi].bracket} · ${esc(todayRound.course)}</div>
+        <div class="yours-title">Semi done · waiting on the other semi</div>
+        <p class="muted">Your back 9 match (Final or 3rd place) fills in when it finishes. Keep entering scores.</p>${go}</div>`;
+    }
     if (current) {
       return `<div class="yours bc-wrap">
         <div class="bc-top"><span>Your match · ${dayName(todayRound)}</span><span class="yours-tee">${current.result.played ? esc(todayRound.course) : `Tee time ${esc(tee || '')}`}</span></div>
@@ -367,8 +443,14 @@ function yourMatchCard(config, standings) {
   let sub = '';
   if (me && !next.pending) {
     const gi = myGroup(next);
-    const opp = next.groups[gi]?.teams.find((t) => t !== myTeam);
-    if (gi >= 0) sub = `${esc(next.tees?.[gi] || '')} tee time · vs ${esc(config.teams[opp]?.name)}`;
+    const g = next.groups[gi];
+    const opp = g?.teams.find((t) => t !== myTeam);
+    if (g?.bracket) {
+      const seat = g.players.indexOf(me);
+      sub = `${esc(next.tees?.[gi] || '')} tee time · Bracket ${g.bracket} semi vs ${esc(playerName(g.players[3 - seat]))}`;
+    } else if (gi >= 0) sub = `${esc(next.tees?.[gi] || '')} tee time · vs ${esc(config.teams[opp]?.name)}`;
+  } else if (next.needsPicks) {
+    sub = 'Bracket picks in progress';
   } else if (next.pending) {
     sub = 'Matchups TBD';
   } else if (next.tees?.length) {
@@ -446,7 +528,7 @@ function renderBoard() {
 
   // Cup scoreboard: big points, team colors, the leader lit up, and a bar
   // toward the most points a team can win over the trip.
-  const maxPts = enabledRounds(config).length * 3;
+  const maxPts = enabledRounds(config).reduce((a, r) => a + roundMaxPoints(r), 0);
   const leaderPts = Math.max(...ranked.map((r) => r.points));
   const teamRows = ranked.map((r, i) => {
     const t = standings.teams[r.idx];
@@ -491,9 +573,10 @@ function renderBoard() {
     </div>`;
   }
 
+  const picking = rounds.find((r) => r.needsPicks);
   return `
     ${champBanner}
-    ${yourMatchCard(config, standings)}
+    ${picking ? bracketPicksCard(config, picking) : yourMatchCard(config, standings)}
     <section>
       <div class="cup">
         <div class="cup-head"><span>Team Standings</span><span>${maxPts} pts per team in play</span></div>
@@ -514,12 +597,14 @@ function renderBoard() {
     <section>
       <h2>Matches</h2>
       ${roundChips(round?.id)}
-      ${round?.pending ? pendingNote(config, round) : round ? `<div class="bc-wrap">
+      ${round?.needsPicks ? '<div class="card tbd"><div class="tbd-title">Bracket picks in progress</div><p>See the top of the Leaderboard.</p></div>'
+        : round?.pending ? pendingNote(config, round) : round ? `<div class="bc-wrap">
         <div class="bc-top"><span>Buckle Up · Match Play</span>
           ${roundMatches.some((m) => m.result.played > 0 && !m.result.done) ? '<span class="bc-live">LIVE</span>' : ''}</div>
         ${round.groups.map((g, gi) => `
         <div class="bc-session"><span>${esc(round.day.split(' ')[0])} · ${esc(round.course)}</span><span>${groupTitle(round, gi)}</span></div>
         ${roundMatches.filter((m) => m.match.group === gi).map((m) => broadcastCard(config, m.match, m.result)).join('')}
+        ${g.bracket && !g.final ? '<div class="bc-next">Back 9: the Final (2 pts) and 3rd place (1 pt) fill in when both semis finish.</div>' : ''}
       `).join('')}</div>` : '<p class="empty">No rounds enabled.</p>'}
     </section>
     <section>
@@ -548,14 +633,15 @@ function renderEntry() {
   if (round.pending) return `${roundChips(round.id)}${pendingNote(config, round)}`;
 
   if (ui.group == null || !round.groups[ui.group]) {
-    const mine = ui.me ? round.groups.findIndex((g) => g.teams.includes(teamOf(config, ui.me))) : -1;
+    const mine = ui.me ? round.groups.findIndex((g) => inGroup(config, g, ui.me)) : -1;
     ui.group = Math.max(0, mine);
   }
   const group = round.groups[ui.group];
   const hole = ui.hole;
   const roundScores = scores[round.id] || {};
-  const players = group.teams.flatMap((t) => config.teams[t].players.map((p) => ({ id: p, team: t })));
+  const players = groupPlayers(config, group);
   const isFront = hole <= 9;
+  const bracket = round.format === 'bracket';
   const par = parFor(config, round.id, hole);
 
   const holeBtns = [...FRONT_NINE, ...BACK_NINE].map((h) => {
@@ -602,7 +688,7 @@ function renderEntry() {
       <div class="entry-head">
         <div><div class="hole-num">Hole ${hole}</div>
         <div class="hole-par">Par ${par ?? '–'}${HOLE_HANDICAPS[round.id] ? ` · Hcp ${HOLE_HANDICAPS[round.id][hole - 1]}` : ''}${par ? ` <span class="hole-max">Max ${par + MAX_OVER_PAR}</span>` : ''}</div></div>
-        <span class="badge ${isFront ? 'bb' : 'sg'}">${isFront ? 'Best Ball' : 'Singles'}</span>
+        <span class="badge ${isFront ? 'bb' : 'sg'}">${bracket ? (isFront ? 'Semis' : 'Finals') : isFront ? 'Best Ball' : 'Singles'}</span>
       </div>
       ${rows}
       ${canScore ? '' : `<p class="spectator-note">👀 Spectator view: only players enter scores.${ui.me ? '' : ' <button class="link" data-action="change-me">Are you a player?</button>'}</p>`}
@@ -612,8 +698,9 @@ function renderEntry() {
       </div>
     </div>
     <div class="bc-wrap bc-mini">
-      <div class="bc-session"><span>${isFront ? 'Best ball match' : 'Singles matches'}</span><span>${groupTitle(round, ui.group)}</span></div>
-      ${segmentMatches.map((m) => broadcastCard(config, m, computeMatch(m, roundScores))).join('')}
+      <div class="bc-session"><span>${bracket ? (isFront ? 'Semifinals' : 'Final & 3rd place') : isFront ? 'Best ball match' : 'Singles matches'}</span><span>${groupTitle(round, ui.group)}</span></div>
+      ${segmentMatches.map((m) => broadcastCard(config, m, computeMatch(m, roundScores))).join('')
+        || '<div class="bc-next">The Final and 3rd place fill in when both semis finish. Scores entered now still count.</div>'}
     </div>`;
 }
 
@@ -652,20 +739,20 @@ function courseCard(config, round, roundScores) {
   const parOut = sum(FRONT_NINE, (h) => pars[h]);
   const parIn = sum(BACK_NINE, (h) => pars[h]);
 
-  const rows = round.groups.map((g, gi) => g.teams.flatMap((t) => config.teams[t].players.map((p) => {
+  const rows = round.groups.map((g, gi) => groupPlayers(config, g).map(({ id: p, team: t }, pi) => {
     const sc = roundScores[p] || {};
     const played = [...FRONT_NINE, ...BACK_NINE].filter((h) => sc[h]);
     const out = sum(FRONT_NINE, (h) => sc[h]);
     const inn = sum(BACK_NINE, (h) => sc[h]);
     const toPar = played.reduce((a, h) => a + sc[h] - (pars[h] || 0), 0);
     const toParTxt = !played.length ? '' : toPar === 0 ? 'E' : toPar > 0 ? `+${toPar}` : String(toPar);
-    return `<tr class="${gi > 0 && t === g.teams[0] && p === config.teams[t].players[0] ? 'group-start' : ''}">
+    return `<tr class="${gi > 0 && pi === 0 ? 'group-start' : ''}">
       <th>${teamDot(t)}${esc(playerName(p))}</th>
       ${nine(FRONT_NINE, (h) => marked(sc[h], pars[h]))}<td class="sub">${out || ''}</td>
       ${nine(BACK_NINE, (h) => marked(sc[h], pars[h]))}<td class="sub">${inn || ''}</td>
       <td class="tot">${out + inn || ''}</td><td class="topar ${toPar < 0 ? 'under' : ''}">${toParTxt}</td>
     </tr>`;
-  })).join('')).join('');
+  }).join('')).join('');
 
   return `<div class="card sc-card"><div class="sc-wrap"><table class="sc full">
     <thead><tr><th>Hole</th>${FRONT_NINE.map((h) => `<th>${h}</th>`).join('')}<th>Out</th>
@@ -764,14 +851,20 @@ function renderSetup() {
         <label class="toggle"><input type="checkbox" data-edit="round-enabled" data-round="${ri}" ${r.enabled ? 'checked' : ''}>
           <b>${esc(r.day)}</b><span class="muted">counts toward the tournament</span></label>
         <input type="text" value="${esc(r.course)}" data-edit="round-course" data-round="${ri}" aria-label="Course" enterkeyhint="done">
-        ${r.seeded ? `<div class="seeded">
+        ${r.format === 'bracket' ? `<div class="seeded">
+            <b>Bracket Day:</b> singles brackets A &amp; B, seeded from the standings. Teams pick their A/B players on the
+            Leaderboard (4th seed first). Semis 1 v 4 and 2 v 3; Final ${BRACKET_POINTS.final} pts, 3rd place ${BRACKET_POINTS.third}.
+            ${Object.keys(config.bracketPicks || {}).length ? `<div>Picks: ${Object.entries(config.bracketPicks).map(([t, p]) => `${esc(config.teams[t]?.name)} A = ${esc(playerName(p))}`).join(' · ')}</div>
+              <button class="link" data-action="bracket-reset">Reset bracket picks</button>` : ''}</div>`
+          : r.seeded ? `<div class="seeded">
             <b>Seeded from the standings</b> after the earlier rounds: 1st v 2nd, 3rd v 4th.
             <button class="link" data-action="seeded" data-round="${ri}" data-on="0">Pick matchups instead</button></div>`
           : `<div class="matchups">${MATCHUPS.map((m, mi) => `
           <button class="${mi === cur ? 'on' : ''}" data-action="matchup" data-round="${ri}" data-m="${mi}">
             <span>${matchupLabel(m[0])}</span><span>${matchupLabel(m[1])}</span></button>`).join('')}</div>
           ${ri === config.rounds.length - 1 ? `<button class="link seed-link" data-action="seeded" data-round="${ri}" data-on="1">Seed from standings instead</button>` : ''}`}
-        ${resolved.pending ? '<div class="singles-line">Singles: TBD until the matchups are set.</div>'
+        ${r.format === 'bracket' ? ''
+          : resolved.pending ? '<div class="singles-line">Singles: TBD until the matchups are set.</div>'
           : resolved.groups.map((g, gi) => {
           const [a, b] = g.teams.map((t) => config.teams[t]);
           const pairs = g.cross ? [[0, 1], [1, 0]] : [[0, 0], [1, 1]];
@@ -794,7 +887,7 @@ function renderSetup() {
 function groupHoleComplete(round, hole) {
   const group = view.rounds.find((r) => r.id === round.id)?.groups[ui.group];
   if (!group) return false;
-  return group.teams.every((t) => view.teams[t].players.every((p) => store.scores[round.id]?.[p]?.[hole]));
+  return groupPlayers(view, group).every((p) => store.scores[round.id]?.[p.id]?.[hole]);
 }
 
 // When the last score on a hole goes in, move to the next hole after a
@@ -1444,6 +1537,20 @@ app.addEventListener('click', async (e) => {
       saveSetup((c) => { c.rounds[ri].seeded = on === '1'; });
       return;
     }
+    case 'bracket-pick': {
+      const t = Number(el.dataset.team);
+      const r = enabledRounds(view).find((x) => x.needsPicks);
+      const allowed = ui.me === ORGANIZER || (isPlayer() && teamOf(view, ui.me) === t);
+      if (!r || r.pickTurn !== t || !allowed) return;
+      const name = playerName(el.dataset.player);
+      if (!confirm(`Lock in ${name} for Bracket A? Their partner goes to Bracket B.`)) return;
+      saveSetup((c) => { (c.bracketPicks ||= {})[t] = el.dataset.player; });
+      return;
+    }
+    case 'bracket-reset':
+      if (!confirm('Clear every team\'s bracket picks?')) return;
+      saveSetup((c) => { c.bracketPicks = {}; });
+      return;
     case 'puttoff': {
       if (!isPlayer()) return;
       const { stage, key } = el.dataset;

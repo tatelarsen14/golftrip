@@ -11,6 +11,10 @@ export function buildMatches(config) {
   const matches = [];
   for (const round of config.rounds) {
     if (!round.enabled || round.pending) continue;
+    if (round.format === 'bracket') {
+      matches.push(...bracketMatches(config, round));
+      continue;
+    }
     round.groups.forEach((group, gi) => {
       const [ta, tb] = group.teams;
       const teamA = config.teams[ta];
@@ -88,8 +92,10 @@ export function computeMatch(match, roundScores) {
   let points = null; // final points, only once the match is decided
   let projected = null; // "if it ended right now"
   if (played > 0) {
-    projected = leader === null ? [POINTS.halve, POINTS.halve]
-      : leader === 0 ? [POINTS.win, POINTS.loss] : [POINTS.loss, POINTS.win];
+    // Bracket finals are worth more (`weight`); a halve splits whatever it's worth.
+    const w = match.weight || 1;
+    projected = leader === null ? [POINTS.halve * w, POINTS.halve * w]
+      : leader === 0 ? [POINTS.win * w, POINTS.loss] : [POINTS.loss, POINTS.win * w];
   }
   if (done) points = projected;
 
@@ -298,10 +304,22 @@ export function resolveConfig(config, scores) {
     const ready = prior.length > 0
       && priorMatches.every((m) => computeMatch(m, scores[m.roundId]).done);
     const { ranked } = rankTeams(resolved, scores, priorIds, 'seed');
-    const seeding = [[ranked[0].idx, ranked[1].idx], [ranked[2].idx, ranked[3].idx]];
-    round.seeding = seeding;
     round.priorIds = priorIds;
     round.priorFinal = ready;
+    if (round.format === 'bracket') {
+      // Every seed matters in a bracket (1 v 4, 2 v 3), so any tie left for a
+      // putt-off holds it up.
+      round.seeding = [[ranked[0].idx, ranked[3].idx], [ranked[1].idx, ranked[2].idx]];
+      if (!ready || ranked.some((t) => t.unresolved)) {
+        round.pending = true;
+        round.needsPuttoff = ready;
+        return;
+      }
+      resolveBracket(resolved, round, scores, ranked.map((t) => t.idx));
+      return;
+    }
+    const seeding = [[ranked[0].idx, ranked[1].idx], [ranked[2].idx, ranked[3].idx]];
+    round.seeding = seeding;
     const splitUndecided = ranked[1].unresolved && ranked[2].unresolved && ranked[1].rank === ranked[2].rank;
     if (ready && !splitUndecided) {
       round.groups = seeding.map((teams, gi) => ({ teams, cross: !!round.groups[gi]?.cross }));
@@ -457,4 +475,73 @@ export function roundTotals(config, scores, playerId) {
     const par = Object.values(config.pars?.[r.id] || {}).reduce((a, b) => a + b, 0);
     return { roundId: r.id, day: r.day, course: r.course, gross: holes.reduce((a, b) => a + b, 0), holes: holes.length, par };
   });
+}
+
+// ---------- Bracket Day (Tuesday) ----------
+//
+// Seeds 1-4 from the standings after the earlier rounds. Each team puts one
+// player in Bracket A and the other in Bracket B (picked in order 4th, 3rd,
+// 2nd, 1st, so the leader picks last). In each bracket, the front 9 is
+// semifinals (1 v 4, 2 v 3) and the back 9 is the final (semi winners) and
+// 3rd place (semi losers). A halved semi is ½ each, and the higher seed
+// advances.
+
+export const BRACKETS = ['A', 'B'];
+export const BRACKET_POINTS = { semi: 1, final: 2, third: 1 };
+
+// The order teams make their A/B picks: last seed first.
+export const pickOrder = (seeds) => [...seeds].reverse();
+
+// Semifinal matches for one bracket group; finals once the group has them.
+function bracketMatches(config, round) {
+  const matches = [];
+  round.groups.forEach((group, gi) => {
+    if (!group.players) return; // not set until the picks are in
+    const seat = (seed) => ({ team: group.teams[seed], players: [group.players[seed]], seed: seed + 1 });
+    const base = { roundId: round.id, group: gi, type: 'singles', bracket: group.bracket };
+    matches.push(
+      { ...base, id: `${round.id}-${group.bracket}-semi1`, stage: 'semi', label: 'Semifinal · 1 v 4', weight: BRACKET_POINTS.semi, holes: FRONT_NINE, sides: [seat(0), seat(3)] },
+      { ...base, id: `${round.id}-${group.bracket}-semi2`, stage: 'semi', label: 'Semifinal · 2 v 3', weight: BRACKET_POINTS.semi, holes: FRONT_NINE, sides: [seat(1), seat(2)] },
+    );
+    if (group.final) {
+      matches.push(
+        { ...base, id: `${round.id}-${group.bracket}-final`, stage: 'final', label: `Bracket ${group.bracket} Final · ${BRACKET_POINTS.final} pts`, weight: BRACKET_POINTS.final, holes: BACK_NINE, sides: group.final.map(seat) },
+        { ...base, id: `${round.id}-${group.bracket}-third`, stage: 'third', label: '3rd place · 1 pt', weight: BRACKET_POINTS.third, holes: BACK_NINE, sides: group.third.map(seat) },
+      );
+    }
+  });
+  return matches;
+}
+
+// Fills in a bracket round from the seeds, the A/B picks and the semis.
+function resolveBracket(config, round, scores, seeds) {
+  const picks = config.bracketPicks || {};
+  const valid = (t) => config.teams[t]?.players.includes(picks[t]);
+  const order = pickOrder(seeds);
+  round.seeds = seeds;
+  round.pickTurn = order.find((t) => !valid(t));
+  if (round.pickTurn !== undefined) {
+    round.pending = true;
+    round.needsPicks = true;
+    return;
+  }
+  const other = (t) => config.teams[t].players.find((p) => p !== picks[t]);
+  round.groups = BRACKETS.map((bracket) => ({
+    bracket,
+    teams: [...seeds],
+    players: seeds.map((t) => (bracket === 'A' ? picks[t] : other(t))),
+  }));
+  // Back 9 matchups once both semis in a bracket are final.
+  for (const group of round.groups) {
+    const semis = bracketMatches(config, { ...round, groups: [group] }).map((m) => ({ m, res: computeMatch(m, scores[round.id]) }));
+    if (!semis.every(({ res }) => res.done)) continue;
+    const winnerLoser = ({ m, res }) => {
+      // Halved semi: the higher seed (side 0) advances.
+      const w = res.leader === null ? 0 : res.leader;
+      return [m.sides[w].seed - 1, m.sides[1 - w].seed - 1];
+    };
+    const [[w1, l1], [w2, l2]] = semis.map(winnerLoser);
+    group.final = [w1, w2].sort((a, b) => a - b);
+    group.third = [l1, l2].sort((a, b) => a - b);
+  }
 }

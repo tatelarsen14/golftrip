@@ -27,6 +27,7 @@ export const TEAM_COLORS = ['#2f7d4f', '#1f5f99', '#b5541c', '#7a3fa0'];
 // and Tuesday is seeded from the standings after Monday.
 export const DEFAULT_CONFIG = {
   puttoffs: {},
+  bracketPicks: {}, // team index -> the player it put in Bracket A
   teams: [
     { name: 'Team 1', players: ['tate', 'garrett'] },
     { name: 'Team 2', players: ['sam', 'jonah'] },
@@ -47,8 +48,10 @@ export const DEFAULT_CONFIG = {
       groups: [{ teams: [0, 3], cross: false }, { teams: [1, 2], cross: false }],
     },
     {
-      // Seeded: 1st v 2nd and 3rd v 4th once Sat-Mon are final.
+      // Seeded from the standings once Sat-Mon are final.
       id: 'tue', tees: ['9:20 AM', '9:30 AM'], date: '2026-10-06', day: 'Tue Oct 6', course: "Coeur d'Alene", enabled: true, seeded: true,
+      // Bracket Day: singles brackets A and B (see scoring.js).
+      format: 'bracket',
       groups: [{ teams: [0, 1], cross: true }, { teams: [2, 3], cross: true }],
     },
   ],
