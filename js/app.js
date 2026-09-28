@@ -1,20 +1,24 @@
 import { createStore, MAX_VIDEO_MB } from './store.js';
-import { PLAYERS, TEAM_COLORS, TRIP, ITINERARY, FLIGHTS, MATCHUPS, HOLE_HANDICAPS } from './data.js';
+import { PLAYERS, TEAM_COLORS, TRIP, ITINERARY, FLIGHTS, HOLE_HANDICAPS } from './data.js';
 import {
   buildMatches, computeMatch, computeStandings, birdieCounts, parFor, scoreMark, rankTeams, resolveConfig,
-  TIEBREAKERS, FRONT_NINE, BACK_NINE, puttoffKey,
+  TIEBREAKERS, puttoffKey, holesOf, halvesOf, groupRoster, roundPoints, ESCALATING_BACK_POINTS, TEAMSTROKE_POINTS,
   matchStreak, birdieStreak, highlights, longestBirdieRun, longestMatchRun, roundTotals,
-  BRACKETS, BRACKET_POINTS,
+  captainRound, draftState, computeSkins, settleUp,
 } from './scoring.js';
 
 const UI_KEY = 'golftrip:ui';
 // Setup only shows on phones where the organizer picked his own name.
 const ORGANIZER = 'tate';
+const PLAYER_IDS = PLAYERS.map((p) => p.id);
+const SKIN_STAKE = 5;
 const app = document.getElementById('app');
 
 let store;
-let view; // store.config with seeded matchups filled in (or marked TBD)
+let view; // store.config with each round's matchups filled in (or marked pending)
+let draft; // Friday's captains and the draft, from draftState()
 let pickedSlot = null; // Setup: first player tapped in a swap
+let tueSel = { pairs: [], pick: [null, null] }; // Tuesday matchups being set on this phone
 const drafts = {}; // unsent text in the composer and comment boxes, by field
 let pendingMedia = []; // photos/videos picked for the next post: { file, url, type }
 let posting = null; // { done, total, frac } while a post uploads
@@ -42,12 +46,20 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
 const GUEST = 'g:';
 const playerName = (id) => (id?.startsWith(GUEST) ? id.slice(GUEST.length) : PLAYERS.find((p) => p.id === id)?.name ?? id);
 const isPlayer = () => PLAYERS.some((p) => p.id === ui.me);
-const teamOf = (config, pid) => config.teams.findIndex((t) => t.players.includes(pid));
-const teamColor = (idx) => TEAM_COLORS[idx % TEAM_COLORS.length];
+const isAdmin = () => ui.me === ORGANIZER;
+const teamOf = (config, pid) => (config.teams || []).findIndex((t) => t.players.includes(pid));
+// Each team's color is the captain's pick; grey for anyone before the draft.
+const teamColor = (idx) => (idx >= 0 ? (view || store?.config)?.teams?.[idx]?.color || TEAM_COLORS[idx % TEAM_COLORS.length] : '#8a938a');
+const teamName = (config, idx) => config.teams?.[idx]?.name || `Team ${idx + 1}`;
+const captainOf = (config, idx) => config.teams?.[idx]?.players[0];
 // Points with a ½ glyph, like a Cup scoreboard: 7.5 -> 7½.
 const fmtHalf = (n) => (Number.isInteger(n) ? String(n) : `${Math.floor(n) || ''}½`);
 const fmtPts = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, ''));
-const sideLabel = (side) => side.players.map(playerName).join(' & ');
+const fmtToPar = (n) => (n === 0 ? 'E' : n > 0 ? `+${n}` : String(n));
+const fmtMoney = (n) => (n === 0 ? '$0' : n > 0 ? `+$${n}` : `−$${-n}`);
+const sideLabel = (side) => (side.players.length > 2 ? teamName(view, side.team) : side.players.map(playerName).join(' & '));
+const dayName = (r) => esc(r.day.split(' ')[0]);
+const todayStr = () => new Date().toLocaleDateString('en-CA');
 
 // A score with its scorecard mark: circle, double circle, square, double square.
 function marked(score, par) {
@@ -78,17 +90,31 @@ function enabledRounds(config) {
   return config.rounds.filter((r) => r.enabled);
 }
 
-// Today's round during the trip, otherwise the first round still in play.
+// Everyone in a tee group, with their team (-1 before the draft).
+function groupPlayers(config, group) {
+  return groupRoster(group).map((p) => ({ id: p.id, team: p.team >= 0 ? p.team : teamOf(config, p.id) }));
+}
+const inGroup = (config, group, pid) => groupPlayers(config, group).some((p) => p.id === pid);
+
+// Done when every match is final (or, for Friday, everyone has every hole in).
+function roundComplete(config, r) {
+  if (r.pending) return false;
+  if (r.format === 'stroke') {
+    const ids = r.groups.flatMap((g) => g.players);
+    return ids.every((p) => holesOf(r).every((h) => store.scores[r.id]?.[p]?.[h]));
+  }
+  const matches = buildMatches({ ...config, rounds: [r] });
+  return matches.length > 0 && matches.every((m) => computeMatch(m, store.scores[r.id]).done);
+}
+
+// Today's round during the trip (the first one still going on a two-round
+// day), otherwise the first round still in play.
 function defaultRoundId(config) {
   const rounds = enabledRounds(config);
   if (!rounds.length) return null;
-  const today = new Date().toLocaleDateString('en-CA');
-  const todays = rounds.find((r) => r.date === today);
-  if (todays) return todays.id;
-  const matches = buildMatches(config);
-  const open = rounds.find((r) => matches
-    .filter((m) => m.roundId === r.id)
-    .some((m) => !computeMatch(m, store.scores[r.id]).done));
+  const todays = rounds.filter((r) => r.date === todayStr());
+  if (todays.length) return (todays.find((r) => !roundComplete(config, r)) || todays[todays.length - 1]).id;
+  const open = rounds.find((r) => !roundComplete(config, r));
   return (open || rounds[rounds.length - 1]).id;
 }
 
@@ -103,100 +129,51 @@ function currentRound() {
 }
 
 function groupLabel(config, group) {
-  if (group.players) return group.players.map((p) => esc(playerName(p))).join(' · ');
-  return group.teams.map((t) => esc(config.teams[t]?.name)).join(' vs ');
+  return groupPlayers(config, group).map((p) => esc(playerName(p.id))).join(' · ');
 }
 
 function groupTitle(round, gi) {
-  if (round.format === 'bracket') return `Bracket ${round.groups[gi]?.bracket || BRACKETS[gi]}`;
-  if (round.seeded) return gi === 0 ? '1st v 2nd' : '3rd v 4th';
-  return `Group ${gi + 1}`;
+  return `Group ${gi + 1}${round.tees?.[gi] ? ` · ${esc(round.tees[gi])}` : ''}`;
 }
 
-// Everyone in a tee group: a bracket lists its four players (one per team),
-// otherwise it's both teams' pairs.
-function groupPlayers(config, group) {
-  if (group.players) return group.players.map((p, i) => ({ id: p, team: group.teams[i] }));
-  return group.teams.flatMap((t) => config.teams[t].players.map((p) => ({ id: p, team: t })));
-}
+const FORMAT_LABELS = { stroke: 'Captain Round', match: 'Match play', teamstroke: 'Team stroke play', escalating: 'Escalating singles' };
 
-const inGroup = (config, group, pid) => groupPlayers(config, group).some((p) => p.id === pid);
-
-// Most points one team can win in a round: 3 normally, 6 on Bracket Day.
-const roundMaxPoints = (r) => (r.format === 'bracket'
-  ? BRACKET_POINTS.semi + BRACKET_POINTS.final + BRACKET_POINTS.semi + BRACKET_POINTS.final : 3);
-
-// Bracket Day picks: each team puts one player in Bracket A and the other in
-// Bracket B, in order from the 4th seed up to the 1st. Either player on the
-// team (or Tate) makes the pick when it's their turn.
-function bracketPicksCard(config, round) {
-  const picks = config.bracketPicks || {};
-  const order = [...round.seeds].reverse();
-  const seedOf = (t) => round.seeds.indexOf(t) + 1;
-  const canPick = (t) => ui.me === ORGANIZER || (isPlayer() && teamOf(config, ui.me) === t);
-  const rows = order.map((t) => {
-    const team = config.teams[t];
-    const [p1, p2] = team.players;
-    const picked = team.players.includes(picks[t]) ? picks[t] : null;
-    let body;
-    if (picked) {
-      const other = team.players.find((p) => p !== picked);
-      body = `<div class="bp-picked"><span><b>A</b> ${esc(playerName(picked))}</span><span><b>B</b> ${esc(playerName(other))}</span></div>`;
-    } else if (t === round.pickTurn && canPick(t)) {
-      body = `<div class="bp-choose">
-        <button data-action="bracket-pick" data-team="${t}" data-player="${p1}">${esc(playerName(p1))} → A<small>${esc(playerName(p2))} → B</small></button>
-        <button data-action="bracket-pick" data-team="${t}" data-player="${p2}">${esc(playerName(p2))} → A<small>${esc(playerName(p1))} → B</small></button>
-      </div>`;
-    } else if (t === round.pickTurn) {
-      body = '<div class="bp-wait">Picking now…</div>';
-    } else {
-      body = '<div class="bp-wait">Waiting</div>';
-    }
-    return `<div class="bp-row ${t === round.pickTurn ? 'turn' : ''}" style="--c:${teamColor(t)}">
-      <div class="bp-team"><span class="bp-seed">#${seedOf(t)}</span> ${esc(team.name)}<small>${team.players.map(playerName).join(' & ')}</small></div>
-      ${body}
-    </div>`;
-  }).join('');
-  return `<div class="card bracket-picks">
-    <div class="tbd-title">🎯 Bracket Day picks</div>
-    <p class="muted">Each team puts one player in <b>Bracket A</b> (${esc(round.tees?.[0] || '')}) and one in <b>Bracket B</b> (${esc(round.tees?.[1] || '')}).
-      4th seed picks first, 1st picks last. Semis in both brackets: <b>1 v 4</b> and <b>2 v 3</b>.</p>
-    ${rows}
-  </div>`;
-}
-
-// Shown in place of a seeded round's matches until Sat-Mon are all final.
+// Shown in place of a round's matches until its matchups are set.
 function pendingNote(config, round) {
-  const ifNow = round.seeding.map(([a, b]) => `${esc(config.teams[a].name)} v ${esc(config.teams[b].name)}`).join(' · ');
-  if (round.needsPicks) return bracketPicksCard(config, round);
+  if (round.waitingOn === 'draft') {
+    return `<div class="card tbd">
+      <div class="tbd-title">Teams TBD</div>
+      <p>Set by Friday's draft. The two low scores at Indian Canyon are the captains and pick the teams.</p>
+    </div>`;
+  }
+  if (round.needsPicks) return tuePicksCard(config, round);
   if (round.needsPuttoff) {
     return `<div class="card tbd">
       <div class="tbd-title">Putt-off needed</div>
-      <p>Teams are dead even for a seed after every tiebreaker. Play the putt-off and record the winner
-        on the Leaderboard; the matchups are set right after.</p>
+      <p>The teams are dead even after every tiebreaker. The putt-off decides who picks ${dayName(round)}'s matchups (see the Leaderboard).</p>
     </div>`;
   }
-  if (round.format === 'bracket') {
-    return `<div class="card tbd">
-      <div class="tbd-title">Bracket Day · TBD</div>
-      <p>Seeds are set when every earlier match is final. Then each team picks its <b>Bracket A</b> and <b>Bracket B</b>
-        player (4th seed first), and the semis are <b>1 v 4</b> and <b>2 v 3</b>.</p>
-      <p class="muted">If it ended now: ${ifNow}</p>
-    </div>`;
-  }
+  const now = round.leaderNow != null ? `<p class="muted">If it ended now: ${esc(teamName(config, round.leaderNow))} would pick.</p>` : '';
   return `<div class="card tbd">
-    <div class="tbd-title">Matchups TBD</div>
-    <p>Set when every earlier match is final: <b>1st v 2nd</b> and <b>3rd v 4th</b> in the standings.</p>
-    <p class="muted">If it ended now: ${ifNow}</p>
+    <div class="tbd-title">${dayName(round)} matchups TBD</div>
+    <p>Once every match through Monday is final, the captain of the team <b>in first</b> sets all four singles matchups.
+      Front 9 matches are worth 1, then opponents swap for the back 9, worth ${ESCALATING_BACK_POINTS}.</p>
+    ${now}
   </div>`;
 }
 
 // ---------- shared components ----------
 
+// Short day name, with AM/PM on a two-round day.
+function roundDay(r) {
+  const same = enabledRounds(view).filter((x) => x.date === r.date);
+  return same.length > 1 ? `${dayName(r)} ${same.indexOf(r) === 0 ? 'AM' : 'PM'}` : dayName(r);
+}
+
 function roundChips(activeId) {
   return `<div class="chips" role="tablist">${enabledRounds(view).map((r) => `
     <button class="chip ${r.id === activeId ? 'on' : ''}" data-action="round" data-id="${r.id}">
-      <span>${esc(r.day.split(' ')[0])}</span><small>${esc(r.course)}</small>
+      <span>${roundDay(r)}</span><small>${esc(r.course)}</small>
     </button>`).join('')}</div>`;
 }
 
@@ -204,8 +181,10 @@ function teamDot(idx) {
   return `<span class="dot" style="background:${teamColor(idx)}"></span>`;
 }
 
+const matchKind = (match) => match.label || (match.type === 'bestball' ? 'Best Ball · Front 9' : 'Singles · Back 9');
+
 function matchCard(match, res, { compact = false } = {}) {
-  const label = match.type === 'bestball' ? 'Best Ball · Front 9' : 'Singles · Back 9';
+  const label = matchKind(match);
   const thru = res.played === 0 ? '' : res.done ? 'Final' : `Thru ${res.played}`;
   // 🔥 for winning 2+ holes in a row, 🥶 for the side on the wrong end of it.
   const streak = !res.done ? matchStreak(res) : null;
@@ -241,10 +220,9 @@ function tripFinal(config, scores) {
 
 // ---------- Tiebreakers ----------
 
-const ORDINALS = ['1st', '2nd', '3rd', '4th'];
+const ORDINALS = ['1st', '2nd', '3rd', '4th', '5th', '6th'];
 
 function fmtTieValue(key, v) {
-  if (key === 'h2h') return `${fmtPts(v)} pts`;
   if (key === 'wins') return `${v} won`;
   if (key === 'margin') return v > 0 ? `+${v}` : String(v);
   if (key === 'strokes') return `${v} strokes`;
@@ -254,14 +232,10 @@ function fmtTieValue(key, v) {
 
 // Step-by-step breakdown of each tie, down the tiebreaker list until it's
 // settled, with putt-off buttons if it comes to that.
-// A putt-off only matters if the still-tied teams straddle a spot that
-// counts: 2nd/3rd for the seeding, 1st for the title.
-function puttoffMatters(ranked, teams, stage) {
-  // Every seed matters for a bracket (1 v 4, 2 v 3).
-  if (stage === 'seed' && enabledRounds(view).find((r) => r.seeded)?.format === 'bracket') return true;
-  const top = Math.min(...ranked.filter((t) => teams.includes(t.idx)).map((t) => ranked.indexOf(t) + 1));
-  const bottom = top + teams.length - 1;
-  return stage === 'seed' ? top <= 2 && bottom >= 3 : top === 1;
+// With two teams a putt-off always matters: it decides who picks Tuesday's
+// matchups, or who wins the Cup.
+function puttoffMatters(ranked, teams) {
+  return teams.length > 1;
 }
 
 function tiePanel(config, title, sub, ties, stage, ranked) {
@@ -290,11 +264,11 @@ function tiePanel(config, title, sub, ties, stage, ranked) {
     const left = p.teams.filter((t) => !p.done.includes(t));
     const sofar = p.done.length
       ? `<p>So far: ${p.done.map((t, i) => `<b>${ORDINALS[i]}</b> ${name(t)}`).join(', ')}</p>` : '';
-    if (!puttoffMatters(ranked, left, stage)) {
+    if (!puttoffMatters(ranked, left)) {
       return `<div class="tie-step">
         <div class="step-label">${TIEBREAKERS.length}. Putt-off</div>
         ${sofar}
-        <p class="muted">${names(left)} stay tied. No putt-off needed: it wouldn't change ${stage === 'seed' ? 'the matchups' : 'the winner'}.</p>
+        <p class="muted">${names(left)} stay tied. No putt-off needed.</p>
         ${p.done.length ? puttoffUndo(p.key) : ''}
       </div>`;
     }
@@ -324,36 +298,67 @@ function tiePanel(config, title, sub, ties, stage, ranked) {
 
 // How the tournament works, for the Format dropdown on the Leaderboard.
 function formatInfo(config) {
-  const rounds = enabledRounds(config);
-  const seeded = rounds.find((r) => r.seeded);
-  const unseeded = rounds.filter((r) => !r.seeded).map((r) => r.day.split(' ')[0]);
+  const total = enabledRounds(config).reduce((a, r) => a + roundPoints(r), 0);
   return `<div class="info-panel">
-    <p><b>Teams:</b> ${config.teams.length} teams of 2. Everything is match play, straight up (no handicaps).</p>
-    <p><b>${rounds.filter((r) => r.format !== 'bracket').map((r) => r.day.split(' ')[0]).join(', ')}</b>: each group of two teams plays:</p>
+    <p><b>Friday · Captain Round.</b> Stroke play at Indian Canyon, no points or skins. The two low scores are the captains
+      (tie: lower back 9, then a putt-off). They draft the two teams of 4 right here: low score picks first, then they alternate.</p>
+    <p><b>Sat · Sun · Mon · Match play.</b> Two groups of 4, with two players from each team in each group.</p>
     <ul>
-      <li><b>Front 9: Best ball.</b> Team vs team. Everyone plays their own ball and enters their own score; the lower score on each team is the team's score for the hole.</li>
-      <li><b>Back 9: Singles.</b> Two 1-on-1 matches between the players in the group.</li>
+      <li><b>Front 9: Best ball.</b> 2 v 2. Everyone plays their own ball; the lower score on each side counts.</li>
+      <li><b>Back 9: Singles.</b> 1 v 1 against a player from the other team.</li>
     </ul>
-    <p><b>Winning a match:</b> the lower score wins the hole; same score halves it. Whoever wins more holes wins the match. It ends early once one side is up by more holes than are left (e.g. <i>Won 3&2</i> = 3 up with 2 to play).</p>
-    <p><b>Points:</b> Win = 1 · Tie = ½ · Loss = 0. Each team can win 3 points a day (best ball + both singles). Most points at the end wins (${rounds.reduce((a, r) => a + roundMaxPoints(r), 0)} max per team).</p>
-    <p><b>Matchups:</b> ${unseeded.join(', ')}: groups rotate so every team plays every other team once.${seeded && seeded.format !== 'bracket' ? ` ${seeded.day.split(' ')[0]}: seeded from the standings, 1st v 2nd and 3rd v 4th (TBD until the earlier rounds are final).` : ''}</p>
-    ${seeded?.format === 'bracket' ? `<p><b>${seeded.day.split(' ')[0]}: Bracket Day.</b> All singles. Teams are seeded 1–4 from the standings and each team puts one player in <b>Bracket A</b> and one in <b>Bracket B</b> (4th seed picks first, 1st last).</p>
-    <ul>
-      <li><b>Front 9: Semis.</b> 1 v 4 and 2 v 3 in each bracket. Win = 1, tie = ½ each and the higher seed advances.</li>
-      <li><b>Back 9: Final</b> (semi winners) worth <b>${BRACKET_POINTS.final}</b>, tie = 1 each. <b>3rd place</b> (semi losers) worth 1, tie = ½ each.</li>
-    </ul>` : ''}
-    <p><b>Max score:</b> triple bogey (par + 3) on every hole.</p>
-    <p><b>Reading a match:</b> <i>2 UP thru 6</i> = leading by 2 holes after 6. <i>All square</i> = tied. <i>Dormie</i> = up by exactly the holes left, so the other side can only tie.</p>
-    <p><b>Side game:</b> the Birdie Board counts everyone's birdies (eagles count as birdies).</p>
+    <p>Partners rotate so you play with each teammate once and face three different opponents. 6 points a day.</p>
+    <p><b>Mon AM · Quicksands.</b> Team stroke play over 14 par 3s. All four scores on each team count; the lower team total wins
+      ${TEAMSTROKE_POINTS} points (tie = 1 each).</p>
+    <p><b>Tuesday · Escalating singles.</b> The captain of the team in first after Monday sets all four matchups. Front 9 singles
+      are worth 1, then opponents swap for the back 9, worth ${ESCALATING_BACK_POINTS} (tie = 1 each). 12 points.</p>
+    <p><b>Points:</b> Win = 1 · Tie = ½ · Loss = 0. ${total} points in all, so ${fmtHalf(total / 2 + 0.5)} wins the Cup.
+      Level at the end goes to the tiebreakers: there's no shared Cup.</p>
+    <p><b>Max score:</b> triple bogey (par + 3) on every hole. No handicaps.</p>
+    <p><b>Reading a match:</b> <i>2 UP thru 6</i> = leading by 2 holes after 6. <i>A/S</i> = all square. <i>Dormie</i> = up by
+      exactly the holes left. <i>Won 3&2</i> = 3 up with 2 to play.</p>
+    <p><b>Skins:</b> every par 3 at the four main courses plus every hole at Quicksands, all 8 players. The outright low score
+      wins $${SKIN_STAKE} from each of the other 7; any tie and nobody wins it. Nothing carries over.</p>
   </div>`;
+}
+
+// Quicksands: one team-vs-team card with each side's score to par.
+function strokeCard(config, match, res) {
+  const side = (si) => {
+    const s = res.sides[si];
+    const t = match.sides[si].team;
+    const lead = res.leader === si;
+    const lost = res.done && res.leader !== null && !lead;
+    return `<div class="bc-side ${si ? 'b' : 'a'} ${lead ? 'lead' : 'trail'} ${lost ? 'lost' : ''}" style="--c:${teamColor(t)}">
+      <div class="bc-team">${esc(teamName(config, t))}</div>
+      ${s.entered ? `<div class="bc-names">${fmtToPar(s.toPar)}</div><div class="bc-sub">${s.strokes} strokes</div>`
+        : `<div class="bc-names">${match.sides[si].players.map((p) => esc(playerName(p))).join(' / ')}</div>`}
+    </div>`;
+  };
+  let status;
+  if (!res.projected) {
+    status = '<div class="bc-status"><div class="big">–</div><div class="small">Not started</div></div>';
+  } else if (res.done) {
+    status = `<div class="bc-status final"><div class="big ${res.leader === null ? 'sm' : ''}">${res.leader === null ? 'Tied' : `By ${res.up}`}</div><div class="small">Final</div></div>`;
+  } else if (res.leader === null) {
+    status = `<div class="bc-status"><div class="big">A/S</div><div class="small">Thru ${res.played}</div></div>`;
+  } else {
+    status = `<div class="bc-status up ${res.leader === 0 ? 'left' : 'right'}" style="--c:${teamColor(match.sides[res.leader].team)}">
+      <div class="big">${res.up}</div><div class="small">stroke${res.up === 1 ? '' : 's'} up</div></div>`;
+  }
+  return `<article class="bc-match">
+    <div class="bc-kind"><span>${esc(match.label)}</span><span>${res.done ? 'Final' : res.projected ? `All thru ${res.played}` : ''}</span></div>
+    <div class="bc-bar">${side(0)}${status}${side(1)}</div>
+  </article>`;
 }
 
 // TV-broadcast style match bar for the Leaderboard: the leading side lights
 // up in its team color, the middle box shows the score, and a hole-by-hole
 // strip above shows who won each hole.
 function broadcastCard(config, match, res) {
+  if (match.type === 'teamstroke') return strokeCard(config, match, res);
   const color = (si) => teamColor(match.sides[si].team);
-  const kind = match.label || (match.type === 'bestball' ? 'Best Ball · Front 9' : 'Singles · Back 9');
+  const kind = matchKind(match);
   const streak = !res.done ? matchStreak(res) : null;
   const side = (si) => {
     const s = match.sides[si];
@@ -361,7 +366,7 @@ function broadcastCard(config, match, res) {
     const lost = res.done && res.leader !== null && !lead;
     const badge = streak?.n >= 2 ? (streak.side === si ? ` <span class="bc-streak">🔥${streak.n}</span>` : ' <span class="bc-streak">🥶</span>') : '';
     return `<div class="bc-side ${si ? 'b' : 'a'} ${lead ? 'lead' : 'trail'} ${lost ? 'lost' : ''}" style="--c:${color(si)}">
-      <div class="bc-team">${esc(config.teams[s.team]?.name)}</div>
+      <div class="bc-team">${esc(teamName(config, s.team))}</div>
       <div class="bc-names">${s.players.map((p) => esc(playerName(p))).join(' / ')}${badge}</div>
     </div>`;
   };
@@ -389,68 +394,43 @@ function broadcastCard(config, match, res) {
   </article>`;
 }
 
-// "Your match" card at the top of the Leaderboard: your live match on a
-// round day, otherwise a countdown to your next tee time.
+// "Your match" card at the top of the Leaderboard: your round today, otherwise
+// a countdown to your next tee time (Friday's Captain Round has no countdown).
 function yourMatchCard(config, standings) {
   const rounds = enabledRounds(config);
   if (!rounds.length || tripFinal(config, store.scores)) return '';
-  const today = new Date().toLocaleDateString('en-CA');
+  const today = todayStr();
   const daysUntil = (date) => Math.round((new Date(`${date}T00:00`) - new Date(`${today}T00:00`)) / 86400000);
   const me = isPlayer() ? ui.me : null;
-  const myTeam = me ? teamOf(config, me) : -1;
-  const myGroup = (r) => (r.pending ? -1 : r.groups.findIndex((g) => inGroup(config, g, me)));
-  const dayName = (r) => esc(r.day.split(' ')[0]);
-  const todayRound = rounds.find((r) => r.date === today);
+  const todays = rounds.filter((r) => r.date === today);
+  const todayRound = todays.find((r) => !roundComplete(config, r)) || todays[todays.length - 1];
+  const todayCard = todayRound && me ? todayMatchCard(config, standings, todayRound, me) : '';
+  if (todayCard) return todayCard;
 
-  if (todayRound && me) {
-    const gi = myGroup(todayRound);
-    if (gi < 0) {
-      return `<div class="yours card"><div class="yours-kicker">Today · ${dayName(todayRound)} · ${esc(todayRound.course)}</div>
-        <div class="yours-title">Matchups TBD</div><p class="muted">Set once the earlier rounds are final.</p></div>`;
-    }
-    const mine = standings.matches.filter((m) => m.match.roundId === todayRound.id && m.match.group === gi
-      && m.match.sides.some((sd) => sd.players.includes(me)));
-    const current = mine.find((m) => !m.result.done);
-    const tee = todayRound.tees?.[gi];
-    const go = `<button class="btn yours-go" data-action="go-scores" data-round="${todayRound.id}" data-group="${gi}">Enter scores →</button>`;
-    if (!current && todayRound.groups[gi].bracket && !todayRound.groups[gi].final) {
-      return `<div class="yours card"><div class="yours-kicker">Bracket ${todayRound.groups[gi].bracket} · ${esc(todayRound.course)}</div>
-        <div class="yours-title">Semi done · waiting on the other semi</div>
-        <p class="muted">Your back 9 match (Final or 3rd place) fills in when it finishes. Keep entering scores.</p>${go}</div>`;
-    }
-    if (current) {
-      return `<div class="yours bc-wrap">
-        <div class="bc-top"><span>Your match · ${dayName(todayRound)}</span><span class="yours-tee">${current.result.played ? esc(todayRound.course) : `Tee time ${esc(tee || '')}`}</span></div>
-        <div class="yours-body">${broadcastCard(config, current.match, current.result)}</div>
-        ${go}
-      </div>`;
-    }
-    const lines = mine.map(({ match, result }) => {
-      const si = match.sides.findIndex((sd) => sd.players.includes(me));
-      const outcome = result.leader === null ? 'Halved' : result.leader === si ? result.status : `Lost ${result.status.replace('Won ', '')}`;
-      return `<div class="kv"><span>${match.type === 'bestball' ? 'Best ball' : 'Singles'}</span><b>${esc(outcome)}</b></div>`;
-    }).join('');
-    const pts = mine.reduce((a, { match, result }) => a + (result.points?.[match.sides.findIndex((sd) => sd.players.includes(me))] || 0), 0);
-    return `<div class="yours card"><div class="yours-kicker">Today · ${dayName(todayRound)} · ${esc(todayRound.course)}</div>
-      <div class="yours-title">You're done for the day · ${fmtHalf(pts)} pt${pts === 1 ? '' : 's'}</div>${lines}</div>`;
-  }
-
-  const next = rounds.find((r) => r.date > today);
+  const next = rounds.find((r) => r.date > today && r.format !== 'stroke');
   if (!next) return '';
   const days = daysUntil(next.date);
-  const beforeTrip = next === rounds[0];
+  const beforeTrip = today < rounds[0].date;
   const when = days === 1 ? 'Tomorrow' : beforeTrip ? `${days} days to tee off` : `${dayName(next)} · in ${days} days`;
   let sub = '';
-  if (me && !next.pending) {
-    const gi = myGroup(next);
+  const gi = me && !next.pending ? next.groups.findIndex((g) => inGroup(config, g, me)) : -1;
+  if (gi >= 0) {
     const g = next.groups[gi];
-    const opp = g?.teams.find((t) => t !== myTeam);
-    if (g?.bracket) {
-      const seat = g.players.indexOf(me);
-      sub = `${esc(next.tees?.[gi] || '')} tee time · Bracket ${g.bracket} semi vs ${esc(playerName(g.players[3 - seat]))}`;
-    } else if (gi >= 0) sub = `${esc(next.tees?.[gi] || '')} tee time · vs ${esc(config.teams[opp]?.name)}`;
+    const mine = g.a.includes(me) ? g.a : g.b;
+    const opp = mine === g.a ? g.b : g.a;
+    const tee = esc(next.tees?.[gi] || '');
+    if (next.format === 'match') {
+      sub = `${tee} · Best ball with ${esc(playerName(mine.find((p) => p !== me)))} vs ${opp.map((p) => esc(playerName(p))).join(' & ')}`;
+    } else if (next.format === 'escalating') {
+      const i = mine.indexOf(me);
+      sub = `${tee} · Front 9 vs ${esc(playerName(opp[i]))}, back 9 vs ${esc(playerName(opp[1 - i]))}`;
+    } else {
+      sub = `${tee} · ${FORMAT_LABELS[next.format]}`;
+    }
+  } else if (next.waitingOn === 'draft') {
+    sub = "Teams set by Friday's draft";
   } else if (next.needsPicks) {
-    sub = 'Bracket picks in progress';
+    sub = `${esc(teamName(config, next.leader))} is setting the matchups`;
   } else if (next.pending) {
     sub = 'Matchups TBD';
   } else if (next.tees?.length) {
@@ -461,6 +441,221 @@ function yourMatchCard(config, standings) {
     <div class="yours-kicker">${beforeTrip ? 'Countdown' : 'Next up'}</div>
     <div class="yours-title">⛳ ${when}</div>
     <div class="yours-detail">${detail}</div>
+  </div>`;
+}
+
+// Your round today: Friday's Captain Round, Quicksands, or your live match.
+function todayMatchCard(config, standings, round, me) {
+  const kicker = `Today · ${roundDay(round)} · ${esc(round.course)}`;
+  if (round.pending) {
+    return `<div class="yours card"><div class="yours-kicker">${kicker}</div>
+      <div class="yours-title">${round.waitingOn === 'draft' ? 'Teams TBD' : 'Matchups TBD'}</div>
+      <p class="muted">${round.waitingOn === 'draft' ? "Set by Friday's draft." : 'Set once the earlier rounds are final.'}</p></div>`;
+  }
+  const gi = round.groups.findIndex((g) => inGroup(config, g, me));
+  if (gi < 0) return '';
+  const tee = round.tees?.[gi];
+  const go = `<button class="btn yours-go" data-action="go-scores" data-round="${round.id}" data-group="${gi}">Enter scores →</button>`;
+  if (round.format === 'stroke') {
+    const r = draft.cr?.rows.find((x) => x.id === me);
+    return `<div class="yours card"><div class="yours-kicker">${kicker}</div>
+      <div class="yours-title">Captain Round</div>
+      <p class="muted">Straight stroke play. The two low scores are the captains.${r?.done ? ` You shot <b>${r.gross}</b> (${fmtToPar(r.toPar)}).` : r?.thru ? ` You're <b>${fmtToPar(r.toPar)}</b> thru ${r.thru}.` : ''}</p>${go}</div>`;
+  }
+  if (round.format === 'teamstroke') {
+    const m = standings.matches.find((x) => x.match.roundId === round.id);
+    return `<div class="yours bc-wrap">
+      <div class="bc-top"><span>Your round · ${roundDay(round)}</span><span class="yours-tee">${m.result.projected ? esc(round.course) : `Tee time ${esc(tee || '')}`}</span></div>
+      <div class="yours-body">${strokeCard(config, m.match, m.result)}</div>${go}</div>`;
+  }
+  const mine = standings.matches.filter((m) => m.match.roundId === round.id && m.match.group === gi
+    && m.match.sides.some((sd) => sd.players.includes(me)));
+  const current = mine.find((m) => !m.result.done);
+  if (current) {
+    return `<div class="yours bc-wrap">
+      <div class="bc-top"><span>Your match · ${roundDay(round)}</span><span class="yours-tee">${current.result.played ? esc(round.course) : `Tee time ${esc(tee || '')}`}</span></div>
+      <div class="yours-body">${broadcastCard(config, current.match, current.result)}</div>
+      ${go}
+    </div>`;
+  }
+  const lines = mine.map(({ match, result }) => {
+    const si = match.sides.findIndex((sd) => sd.players.includes(me));
+    const outcome = result.leader === null ? 'Halved' : result.leader === si ? result.status : `Lost ${result.status.replace('Won ', '')}`;
+    return `<div class="kv"><span>${esc(matchKind(match))}</span><b>${esc(outcome)}</b></div>`;
+  }).join('');
+  const pts = mine.reduce((a, { match, result }) => a + (result.points?.[match.sides.findIndex((sd) => sd.players.includes(me))] || 0), 0);
+  return `<div class="yours card"><div class="yours-kicker">${kicker}</div>
+    <div class="yours-title">You're done · ${fmtHalf(pts)} pt${pts === 1 ? '' : 's'}</div>${lines}</div>`;
+}
+
+// ---------- Friday: Captain Round and the draft ----------
+
+// Friday's stroke play board: live to par, then final with the captains.
+function captainBoard(config) {
+  const cr = draft.cr;
+  if (!cr) return '';
+  const started = cr.rows.some((r) => r.thru);
+  const final = cr.allDone;
+  const caps = draft.captains || [];
+  const rows = cr.rows.map((r, i) => {
+    const cap = final ? caps.includes(r.id) : started && i < 2 && r.thru > 0;
+    const first = final && caps[0] === r.id;
+    // Tiebreak notes only where they decide a captain spot or the first pick.
+    const tb = final && r.tiebreak && i < 3 && !(r.unresolved && !cr.puttoff?.players.includes(r.id)) ? r.tiebreak : null;
+    return `<div class="cr-row ${cap ? 'cap' : ''}">
+      <span class="cr-rank">${r.thru ? r.rank : ''}</span>
+      <span class="cr-name">${esc(playerName(r.id))}${cap ? `<span class="cr-c" title="Captain">C</span>` : ''}${first ? '<small>picks first</small>' : ''}
+        ${tb ? `<small>${r.unresolved ? 'still tied' : `on ${esc(tb.toLowerCase())}`}</small>` : ''}</span>
+      <span class="cr-thru">${r.done ? `${r.gross}${tb ? ` <small>(${r.back} in)</small>` : ''}` : r.thru ? `thru ${r.thru}` : ''}</span>
+      <span class="cr-par ${r.toPar < 0 ? 'under' : ''}">${r.thru ? fmtToPar(r.toPar) : '–'}</span>
+    </div>`;
+  }).join('');
+  let puttoff = '';
+  if (cr.puttoff && !draft.manual) {
+    const left = cr.puttoff.players.filter((p) => !cr.puttoff.done.includes(p));
+    puttoff = `<div class="tie-step puttoff">
+      <div class="step-label">Putt-off ⛳</div>
+      <p>${left.map((p) => esc(playerName(p))).join(' & ')} are dead even on total and back 9. Head to the putting green!</p>
+      ${isPlayer() ? `<p class="muted">Tap the winner${left.length > 2 ? ', then the next finisher' : ''}:</p>
+        <div class="puttoff-btns">${left.map((p) => `<button data-action="cap-puttoff" data-key="${cr.puttoff.key}" data-player="${p}">${esc(playerName(p))}</button>`).join('')}</div>` : ''}
+      ${cr.puttoff.done.length ? `<button class="link" data-action="cap-puttoff-reset" data-key="${cr.puttoff.key}">Undo putt-off</button>` : ''}
+    </div>`;
+  }
+  const sub = draft.manual ? 'Captains were set by hand in Setup.'
+    : final ? (caps.length ? 'The two low scores are the captains.' : 'Tied for a captain spot after the back 9.')
+      : started ? 'Live. The top two when everyone finishes are the captains (tie: lower back 9, then a putt-off).'
+        : 'Straight stroke play. The two low scores are the captains.';
+  return `<div class="card cr-card">
+    <div class="cr-head"><span>🎖️ Captain Round</span><span>${esc(cr.round.course)}</span></div>
+    <p class="muted">${sub}</p>
+    ${rows}${puttoff}
+  </div>`;
+}
+
+// The live draft: captains alternate picks, low score first. Every pick
+// shows up on everyone's phone. Once it's done, captains name their team and
+// pick a color.
+function draftCard(config) {
+  const d = draft;
+  if (d.stage === 'captains') return '';
+  const total = PLAYER_IDS.length - 2;
+  const color = (i) => (config.teams?.[i]?.color) || TEAM_COLORS[i];
+  const canPick = isAdmin() || ui.me === d.captains[d.turn];
+  const cols = [0, 1].map((i) => {
+    const slots = Array.from({ length: total / 2 }, (_, k) => {
+      const p = d.rosters[i][k + 1];
+      return `<li class="${p ? '' : 'open'}">${p ? esc(playerName(p)) : `Pick ${k * 2 + i + 1}`}</li>`;
+    }).join('');
+    const name = d.stage === 'done' ? esc(teamName(config, i)) : `Team ${esc(playerName(d.captains[i]))}`;
+    return `<div class="dr-team ${d.turn === i ? 'turn' : ''}" style="--c:${color(i)}">
+      <div class="dr-name">${name}</div>
+      <div class="dr-cap">${esc(playerName(d.captains[i]))} <small>Captain</small></div>
+      <ol>${slots}</ol>
+    </div>`;
+  }).join('');
+  let action = '';
+  if (d.stage === 'drafting') {
+    const on = esc(playerName(d.captains[d.turn]));
+    action = `<div class="dr-clock">Pick ${d.picks.length + 1} of ${total} · <b>${on}</b> is on the clock</div>
+      ${canPick ? `<div class="dr-pool">${d.pool.map((p) => `<button data-action="draft-pick" data-player="${p}">${esc(playerName(p))}</button>`).join('')}</div>`
+        : `<p class="muted dr-wait">Waiting on ${on}… Picks show up here live.</p>`}
+      ${isAdmin() && d.picks.length ? '<button class="link" data-action="draft-undo">Undo last pick</button>' : ''}`;
+  } else {
+    const mine = [0, 1].filter((i) => isAdmin() || ui.me === d.captains[i]);
+    action = mine.length ? mine.map((i) => `<div class="dr-edit" style="--c:${color(i)}">
+        <label>${mine.length > 1 ? `${esc(playerName(d.captains[i]))}'s team` : 'Your team'}
+          <input type="text" id="team-name-${i}" value="${esc(teamName(config, i))}" data-edit="team-name" data-team="${i}" maxlength="24" enterkeyhint="done"></label>
+        <div class="swatches">${TEAM_COLORS.map((c) => {
+          const taken = color(1 - i) === c;
+          return `<button class="sw ${color(i) === c ? 'on' : ''}" style="--sw:${c}" data-action="team-color" data-team="${i}" data-color="${c}" ${taken ? 'disabled' : ''} aria-label="Color"></button>`;
+        }).join('')}</div>
+      </div>`).join('') : '<p class="muted">The captains can name their teams and pick colors here.</p>';
+  }
+  return `<div class="card dr-card">
+    <div class="cr-head"><span>🎯 ${d.stage === 'done' ? 'The teams' : 'The Draft'}</span><span>${d.stage === 'done' ? 'Draft complete' : 'Low score picks first'}</span></div>
+    <div class="dr-cols">${cols}</div>
+    ${action}
+  </div>`;
+}
+
+// ---------- Tuesday: the leader sets the matchups ----------
+
+function tuePicksCard(config, round) {
+  const L = round.leader;
+  const cap = captainOf(config, L);
+  const can = isAdmin() || ui.me === cap;
+  const name = (p) => esc(playerName(p));
+  const pairs = can ? tueSel.pairs : [];
+  const slot = (i) => {
+    const p = pairs[i];
+    const label = `${esc(round.tees?.[i >> 1] || `Group ${(i >> 1) + 1}`)} · Match ${(i % 2) + 1}`;
+    return `<div class="tp-slot ${can && i === pairs.length ? 'on' : ''}"><span class="tp-label">${label}</span>
+      <span>${p ? `${teamDot(0)}${name(p[0])} <span class="vs">v</span> ${teamDot(1)}${name(p[1])}` : '<span class="muted">–</span>'}</span></div>`;
+  };
+  const intro = `<p class="muted">${esc(teamName(config, L))} finished first, so captain <b>${name(cap)}</b> sets all four singles matchups.
+    Front 9 is worth 1 a match; then opponents swap within each group for the back 9, worth ${ESCALATING_BACK_POINTS}.</p>`;
+  if (!can) {
+    return `<div class="card tp-card"><div class="cr-head"><span>👑 Tuesday matchups</span><span>${name(cap)} is picking</span></div>
+      ${intro}<p class="muted">They'll show up here the moment they're locked in.</p></div>`;
+  }
+  let body = '';
+  if (pairs.length < 4) {
+    const used = new Set(pairs.flat());
+    body = [0, 1].map((t) => `<div class="tp-pick">
+      <div class="tp-team">${teamDot(t)}${esc(teamName(config, t))}</div>
+      <div class="dr-pool">${config.teams[t].players.filter((p) => !used.has(p)).map((p) => `
+        <button class="${tueSel.pick[t] === p ? 'on' : ''}" data-action="tue-sel" data-team="${t}" data-player="${p}">${name(p)}</button>`).join('')}</div>
+    </div>`).join('');
+    body += '<p class="muted">Tap one player from each team to make a match.</p>';
+  } else {
+    body = `<div class="tp-back"><b>Back 9 (${ESCALATING_BACK_POINTS} pts each):</b> ${[0, 1].map((g) => {
+      const [x, y] = [pairs[g * 2], pairs[g * 2 + 1]];
+      return `${name(x[0])} v ${name(y[1])}, ${name(y[0])} v ${name(x[1])}`;
+    }).join(' · ')}</div>
+      <button class="btn" data-action="tue-lock">Lock in matchups</button>`;
+  }
+  return `<div class="card tp-card">
+    <div class="cr-head"><span>👑 Tuesday matchups</span><span>${pairs.length} of 4 set</span></div>
+    ${intro}
+    ${[0, 1, 2, 3].map(slot).join('')}
+    ${body}
+    ${pairs.length ? '<button class="link" data-action="tue-undo">Undo</button>' : ''}
+  </div>`;
+}
+
+// ---------- Skins ----------
+
+const courseOf = (config, roundId) => config.rounds.find((r) => r.id === roundId)?.course || '';
+
+function skinsCard(config) {
+  const { holes, net } = computeSkins(config, store.scores, PLAYER_IDS, SKIN_STAKE);
+  const won = holes.filter((h) => h.winner);
+  const decided = holes.filter((h) => !h.waiting.length);
+  if (!decided.length) {
+    return `<div class="card sk-empty">💰 <b>${holes.length} skins</b> up for grabs: every par 3 at the main courses plus all 14 at Quicksands.
+      The outright low score wins $${SKIN_STAKE} from each of the other ${PLAYER_IDS.length - 1}. Any tie, no skin.</div>`;
+  }
+  const count = {};
+  won.forEach((h) => { count[h.winner] = (count[h.winner] || 0) + 1; });
+  const rows = PLAYER_IDS.map((p) => ({ p, v: net[p], n: count[p] || 0 }))
+    .sort((a, b) => b.v - a.v || playerName(a.p).localeCompare(playerName(b.p)));
+  const recent = [...won].reverse().map((h) => `<div class="sk-hole">
+      <span>${esc(courseOf(config, h.roundId))} #${h.hole}</span>
+      <b>${esc(playerName(h.winner))} ${marked(h.score, h.par)}</b>
+    </div>`).join('');
+  const open = ui.info === 'settle';
+  const pays = settleUp(net);
+  return `<div class="card sk-card">
+    <div class="sk-sum">${won.length} won · ${decided.length - won.length} tied · ${holes.length - decided.length} to play</div>
+    ${rows.map((r) => `<div class="sk-row">
+      <span class="sk-name">${teamDot(teamOf(config, r.p))}${esc(playerName(r.p))}</span>
+      <span class="sk-n">${r.n ? `${r.n} skin${r.n === 1 ? '' : 's'}` : ''}</span>
+      <b class="sk-v ${r.v > 0 ? 'up' : r.v < 0 ? 'down' : ''}">${fmtMoney(r.v)}</b>
+    </div>`).join('')}
+    ${recent ? `<div class="sk-recent">${recent}</div>` : ''}
+    <button class="info-btn ${open ? 'on' : ''}" data-action="info" data-id="settle">Settle up ${open ? '▴' : '▾'}</button>
+    ${open ? `<div class="sk-settle">${pays.length ? pays.map((x) => `<div class="kv"><span>${esc(playerName(x.from))} → ${esc(playerName(x.to))}</span><b>$${x.amount}</b></div>`).join('')
+      : '<p class="muted">Everyone is even.</p>'}</div>` : ''}
   </div>`;
 }
 
@@ -505,46 +700,48 @@ function renderBoard() {
   const standings = computeStandings(config, scores);
   const round = currentRound();
   const rounds = enabledRounds(config);
-  const allIds = rounds.map((r) => r.id);
-  const allFinal = standings.matches.length > 0 && !rounds.some((r) => r.pending)
-    && standings.matches.every((m) => m.result.done);
+  const scoring = rounds.filter((r) => r.format !== 'stroke');
+  const allIds = scoring.map((r) => r.id);
+  const hasTeams = config.teams.length === 2;
+  const allFinal = hasTeams && tripFinal(config, scores);
 
-  // Tiebreakers only show at the two checkpoints: when the rounds before the
-  // seeded day are all final (until that day starts), and at the very end.
-  const seeded = rounds.find((r) => r.seeded);
-  const seededStarted = seeded && standings.matches.some((m) => m.match.roundId === seeded.id && m.result.played > 0);
-  const seedStage = !allFinal && seeded?.priorFinal && !seededStarted;
+  // Tiebreakers only show at the two checkpoints: once everything through
+  // Monday is final (until Tuesday starts), and at the very end.
+  const tue = rounds.find((r) => r.format === 'escalating');
+  const tueStarted = tue && standings.matches.some((m) => m.match.roundId === tue.id && m.result.played > 0);
+  const seedStage = hasTeams && !allFinal && tue?.priorFinal && !tueStarted;
   const stage = seedStage ? 'seed' : 'final';
-  const { ranked } = rankTeams(config, scores, seedStage ? seeded.priorIds : allIds, stage);
+  const { ranked } = rankTeams(config, scores, seedStage ? tue.priorIds : allIds, stage);
   let panel = '';
   if (allFinal) {
     const { ties } = rankTeams(config, scores, allIds, 'final');
-    if (ties.length) panel = tiePanel(config, 'Final standings', 'Teams finished level on points, so the tiebreakers decide the order.', ties, 'final', ranked);
+    if (ties.length) panel = tiePanel(config, 'The Cup', 'The teams finished level on points, so the tiebreakers decide the Cup.', ties, 'final', ranked);
   } else if (seedStage) {
-    const { ties } = rankTeams(config, scores, seeded.priorIds, 'seed');
-    if (ties.length) panel = tiePanel(config, `${esc(seeded.day.split(' ')[0])} seeding`, `Teams are level on points after the earlier rounds, so the tiebreakers set ${esc(seeded.day.split(' ')[0])}'s matchups.`, ties, 'seed', ranked);
+    const { ties } = rankTeams(config, scores, tue.priorIds, 'seed');
+    if (ties.length) panel = tiePanel(config, `Who picks ${dayName(tue)}`, `The teams are level on points after Monday, so the tiebreakers decide who sets ${dayName(tue)}'s matchups.`, ties, 'seed', ranked);
   }
   const showTiebreaks = !!panel;
 
   // Cup scoreboard: big points, team colors, the leader lit up, and a bar
-  // toward the most points a team can win over the trip.
-  const maxPts = enabledRounds(config).reduce((a, r) => a + roundMaxPoints(r), 0);
-  const leaderPts = Math.max(...ranked.map((r) => r.points));
+  // toward the points it takes to win.
+  const total = scoring.reduce((a, r) => a + roundPoints(r), 0);
+  const toWin = total / 2 + 0.5;
+  const leaderPts = Math.max(0, ...ranked.map((r) => r.points));
   const teamRows = ranked.map((r, i) => {
     const t = standings.teams[r.idx];
     const rank = i > 0 && ranked[i - 1].rank === r.rank ? '' : r.rank;
     const swing = t.projected - t.points;
     const live = swing > 0 ? `<div class="cup-live">+${fmtHalf(swing)} live</div>` : '';
     const tb = !showTiebreaks ? '' : r.unresolved ? '<div class="cup-tb">Tied on every tiebreaker</div>'
-      : r.tiebreak ? `<div class="cup-tb">Placed on tiebreaker: ${esc(r.tiebreak)}</div>` : '';
+      : r.tiebreak ? `<div class="cup-tb">Ahead on tiebreaker: ${esc(r.tiebreak)}</div>` : '';
     const winner = allFinal && i === 0 && !r.unresolved;
     const lead = winner || (!allFinal && t.points > 0 && t.points === leaderPts);
-    const pct = (n) => `${Math.min(100, (n / maxPts) * 100)}%`;
+    const pct = (n) => `${Math.min(100, (n / toWin) * 100)}%`;
     return `<div class="cup-row ${lead ? 'lead' : ''} ${winner ? 'winner' : ''}" style="--c:${teamColor(t.idx)}">
       <div class="cup-rank">${winner ? '🏆' : rank}</div>
       <div class="cup-team">
         <div class="cup-name">${esc(t.name)}</div>
-        <div class="cup-players">${t.players.map(playerName).join(' & ')} · ${t.w}-${t.l}-${t.h}</div>
+        <div class="cup-players">${t.players.map(playerName).join(', ')} · ${t.w}-${t.l}-${t.h}</div>
         <div class="cup-bar"><span class="proj" style="width:${pct(t.projected)}"></span><span style="width:${pct(t.points)}"></span></div>
         ${tb}
       </div>
@@ -553,7 +750,7 @@ function renderBoard() {
   }).join('');
 
   const roundMatches = standings.matches.filter((m) => m.match.roundId === round?.id);
-  const birdies = Object.values(birdieCounts(config, scores)).sort((a, b) => (
+  const birdies = Object.values(birdieCounts(config, scores, PLAYER_IDS)).sort((a, b) => (
     b.birdies - a.birdies || playerName(a.id).localeCompare(playerName(b.id))));
 
   const champ = allFinal ? ranked[0] : null;
@@ -561,26 +758,58 @@ function renderBoard() {
   if (champ && !champ.unresolved) {
     champBanner = `<div class="champ" style="--team:${teamColor(champ.idx)}">
       <div class="champ-cup">🏆</div>
-      <div><div class="champ-name">${esc(champ.name)} are the champions</div>
-      <div class="champ-sub">${champ.players.map(playerName).join(' & ')} · ${fmtPts(champ.points)} pts${champ.tiebreak ? ` · won on ${esc(champ.tiebreak.toLowerCase())}` : ''}</div>
+      <div><div class="champ-name">${esc(champ.name)} win the Cup</div>
+      <div class="champ-sub">${champ.players.map(playerName).join(', ')} · ${fmtPts(champ.points)} pts${champ.tiebreak ? ` · on ${esc(champ.tiebreak.toLowerCase())}` : ''}</div>
       <button class="champ-link" data-action="tab" data-tab="recap">See the trip recap →</button></div>
     </div>`;
   } else if (champ) {
     champBanner = `<div class="champ">
       <div class="champ-cup">⛳</div>
-      <div><div class="champ-name">Tied for the title</div>
-      <div class="champ-sub">Every tiebreaker is even. The putt-off decides it (see below).</div></div>
+      <div><div class="champ-name">Dead even for the Cup</div>
+      <div class="champ-sub">Every tiebreaker is level. The putt-off decides it (see below).</div></div>
     </div>`;
   }
 
-  const picking = rounds.find((r) => r.needsPicks);
+  // Top of the board: Friday's board and the draft until the teams are set
+  // and Saturday starts, Tuesday's picks while the leader sets them, and
+  // always your own match.
+  const fri = rounds.find((r) => r.format === 'stroke');
+  const firstMatch = scoring[0];
+  const friLive = fri && (todayStr() >= fri.date || draft.cr?.rows.some((r) => r.thru));
+  const satStarted = firstMatch && Object.keys(scores[firstMatch.id] || {}).length > 0;
+  let feature = '';
+  let featureKind = '';
+  if (draft.stage === 'captains' && friLive) [feature, featureKind] = [captainBoard(config), 'captains'];
+  else if (draft.stage !== 'captains' && !satStarted) [feature, featureKind] = [draftCard(config), 'draft'];
+  else if (tue?.needsPicks) [feature, featureKind] = [tuePicksCard(config, tue), 'tue'];
+
+  let matchesHtml;
+  if (!round) matchesHtml = '<p class="empty">No rounds enabled.</p>';
+  else if (round.format === 'stroke') {
+    matchesHtml = `${featureKind === 'captains' ? '' : captainBoard(config)}${draft.stage !== 'captains' && featureKind !== 'draft' ? draftCard(config) : ''}`
+      || '<p class="empty">The Captain Round is live at the top of the Leaderboard.</p>';
+  } else if (round.pending) matchesHtml = round.needsPicks && featureKind === 'tue' ? '<div class="card tbd"><div class="tbd-title">Matchups being set</div><p>See the top of the Leaderboard.</p></div>' : pendingNote(config, round);
+  else {
+    matchesHtml = `<div class="bc-wrap">
+      <div class="bc-top"><span>Buckle Up · ${esc(FORMAT_LABELS[round.format])}</span>
+        ${roundMatches.some((m) => (m.result.played > 0 || m.result.projected) && !m.result.done) ? '<span class="bc-live">LIVE</span>' : ''}</div>
+      ${round.format === 'teamstroke'
+        ? `<div class="bc-session"><span>${roundDay(round)} · ${esc(round.course)}</span><span>All four count</span></div>
+          ${roundMatches.map((m) => strokeCard(config, m.match, m.result)).join('')}`
+        : round.groups.map((g, gi) => `
+          <div class="bc-session"><span>${roundDay(round)} · ${esc(round.course)}</span><span>${groupTitle(round, gi)}</span></div>
+          ${roundMatches.filter((m) => m.match.group === gi).map((m) => broadcastCard(config, m.match, m.result)).join('')}`).join('')}
+    </div>`;
+  }
+
   return `
     ${champBanner}
-    ${picking ? bracketPicksCard(config, picking) : yourMatchCard(config, standings)}
+    ${yourMatchCard(config, standings)}
+    ${feature}
     <section>
       <div class="cup">
-        <div class="cup-head"><span>Team Standings</span><span>${maxPts} pts per team in play</span></div>
-        ${teamRows}
+        <div class="cup-head"><span>The Cup</span><span>${hasTeams ? `${fmtHalf(toWin)} of ${total} to win` : `${total} points`}</span></div>
+        ${hasTeams ? teamRows : `<div class="cup-empty">Two teams of 4, picked by the captains in Friday's draft.</div>`}
       </div>
       ${panel}
       <div class="info-toggles">
@@ -589,23 +818,20 @@ function renderBoard() {
       </div>
       ${ui.info === 'format' ? formatInfo(config) : ''}
       ${ui.info === 'tiebreakers' ? `<div class="info-panel">
-        <p>If teams are level on points (for Tuesday's seeding after Monday, and for the final standings):</p>
+        <p>If the teams are level on points (after Monday, for who sets Tuesday's matchups, and at the end, for the Cup):</p>
         <ol>${TIEBREAKERS.map((tb) => `<li>${tb.label}</li>`).join('')}</ol>
-        <p><b>Head-to-head</b> counts points only from matches between the tied teams. <b>Holes-up margin</b> adds up how much each match was won or lost by (Won 3&2 = +3, lost 1 UP = −1). <b>Total strokes</b> is both players' scores added up over the rounds that count. <b>Putt-off</b>: if it's still dead even, the tied teams settle it on the putting green and someone records the winner here.</p>
+        <p><b>Holes-up margin</b> adds up how much each match was won or lost by (Won 3&2 = +3, lost 1 UP = −1). <b>Total strokes</b> is every player's score added up over the rounds that count. <b>Putt-off</b>: if it's still dead even, settle it on the putting green and record the winner here.</p>
+        <p><b>Captains</b> (Friday): tied on total, the lower back 9 wins; still tied, a putt-off.</p>
       </div>` : ''}
     </section>
     <section>
       <h2>Matches</h2>
       ${roundChips(round?.id)}
-      ${round?.needsPicks ? '<div class="card tbd"><div class="tbd-title">Bracket picks in progress</div><p>See the top of the Leaderboard.</p></div>'
-        : round?.pending ? pendingNote(config, round) : round ? `<div class="bc-wrap">
-        <div class="bc-top"><span>Buckle Up · Match Play</span>
-          ${roundMatches.some((m) => m.result.played > 0 && !m.result.done) ? '<span class="bc-live">LIVE</span>' : ''}</div>
-        ${round.groups.map((g, gi) => `
-        <div class="bc-session"><span>${esc(round.day.split(' ')[0])} · ${esc(round.course)}</span><span>${groupTitle(round, gi)}</span></div>
-        ${roundMatches.filter((m) => m.match.group === gi).map((m) => broadcastCard(config, m.match, m.result)).join('')}
-        ${g.bracket && !g.final ? '<div class="bc-next">Back 9: the Final (2 pts) and 3rd place (1 pt) fill in when both semis finish.</div>' : ''}
-      `).join('')}</div>` : '<p class="empty">No rounds enabled.</p>'}
+      ${matchesHtml}
+    </section>
+    <section>
+      <h2>Skins 💰</h2>
+      ${skinsCard(config)}
     </section>
     <section>
       <h2>Birdie Board 🐦</h2>
@@ -625,6 +851,16 @@ function renderScores() {
   return toggle + (card ? renderCards() : renderEntry());
 }
 
+// What's being played on a hole, for the badge and the match bar.
+function segmentLabel(round, hole) {
+  const [front] = halvesOf(round);
+  const isFront = front.includes(hole);
+  if (round.format === 'stroke') return ['Stroke play', 'Captain Round'];
+  if (round.format === 'teamstroke') return ['Team stroke', 'Team stroke play'];
+  if (round.format === 'escalating') return isFront ? ['Singles · 1 pt', 'Front 9 singles'] : [`Singles · ${ESCALATING_BACK_POINTS} pts`, 'Back 9 singles'];
+  return isFront ? ['Best Ball', 'Best ball match'] : ['Singles', 'Singles matches'];
+}
+
 function renderEntry() {
   const config = view;
   const { scores } = store;
@@ -636,19 +872,23 @@ function renderEntry() {
     const mine = ui.me ? round.groups.findIndex((g) => inGroup(config, g, ui.me)) : -1;
     ui.group = Math.max(0, mine);
   }
+  const all = holesOf(round);
+  const [front] = halvesOf(round);
+  if (!all.includes(ui.hole)) ui.hole = all[all.length - 1];
   const group = round.groups[ui.group];
   const hole = ui.hole;
+  const last = all.length;
   const roundScores = scores[round.id] || {};
   const players = groupPlayers(config, group);
-  const isFront = hole <= 9;
-  const bracket = round.format === 'bracket';
+  const isFront = front.includes(hole);
   const par = parFor(config, round.id, hole);
+  const [badge, segment] = segmentLabel(round, hole);
 
-  const holeBtns = [...FRONT_NINE, ...BACK_NINE].map((h) => {
+  const holeBtns = all.map((h) => {
     const complete = players.every((p) => roundScores[p.id]?.[h]);
     const some = players.some((p) => roundScores[p.id]?.[h]);
     return `<button class="hole ${h === hole ? 'on' : ''} ${complete ? 'full' : some ? 'part' : ''}"
-      data-action="hole" data-hole="${h}">${h}</button>${h === 9 ? '<span class="turn"></span>' : ''}`;
+      data-action="hole" data-hole="${h}">${h}</button>${h === front[front.length - 1] ? '<span class="turn"></span>' : ''}`;
   }).join('');
 
   const bStreak = (pid) => {
@@ -658,7 +898,9 @@ function renderEntry() {
   const canScore = isPlayer();
   const rows = players.map((p) => {
     const v = roundScores[p.id]?.[hole];
-    const total = Object.values(roundScores[p.id] || {}).reduce((a, b) => a + b, 0);
+    const done = all.filter((h) => roundScores[p.id]?.[h]);
+    const total = done.reduce((a, h) => a + roundScores[p.id][h], 0);
+    const toPar = done.reduce((a, h) => a + roundScores[p.id][h] - (parFor(config, round.id, h) || 0), 0);
     // One tap per score: eagle through triple bogey (the max). Tap the
     // selected number again to clear it.
     const quick = canScore && par ? `<div class="quick" style="--n:${scoreChoices(par).length}">${scoreChoices(par).map((n) => `
@@ -667,7 +909,7 @@ function renderEntry() {
     return `<div class="entry-row">
       <div class="entry-top">
         ${teamDot(p.team)}
-        <div class="entry-name">${esc(playerName(p.id))}${bStreak(p.id)}<small>${total ? `${total} total` : ''}</small></div>
+        <div class="entry-name">${esc(playerName(p.id))}${bStreak(p.id)}<small>${total ? `${total} · ${fmtToPar(toPar)}` : ''}</small></div>
         <div class="stepper"><output class="${v ? '' : 'blank'}">${v ? marked(v, par) : '–'}</output></div>
       </div>
       ${quick}
@@ -675,7 +917,17 @@ function renderEntry() {
   }).join('');
 
   const segmentMatches = buildMatches(config)
-    .filter((m) => m.roundId === round.id && m.group === ui.group && m.holes.includes(hole));
+    .filter((m) => m.roundId === round.id && (m.group === ui.group || m.group === -1) && m.holes.includes(hole));
+  const skinHole = round.skins === 'all' || (round.skins === 'par3' && par === 3);
+  let below = '';
+  if (round.format === 'stroke') {
+    below = captainBoard(config);
+  } else {
+    below = `<div class="bc-wrap bc-mini">
+      <div class="bc-session"><span>${segment}</span><span>${round.format === 'teamstroke' ? 'Both groups' : groupTitle(round, ui.group)}</span></div>
+      ${segmentMatches.map((m) => broadcastCard(config, m, computeMatch(m, roundScores))).join('')}
+    </div>`;
+  }
 
   return `
     ${roundChips(round.id)}
@@ -683,25 +935,21 @@ function renderEntry() {
       <button class="${gi === ui.group ? 'on' : ''}" data-action="group" data-group="${gi}">
         ${groupTitle(round, gi)}<small>${groupLabel(config, g)}</small>
       </button>`).join('')}</div>
-    <div class="holes">${holeBtns}</div>
+    <div class="holes" style="--holes:${last}">${holeBtns}</div>
     <div class="card entry">
       <div class="entry-head">
-        <div><div class="hole-num">Hole ${hole}</div>
+        <div><div class="hole-num">Hole ${hole}${skinHole ? ' <span class="skin-tag">💰 Skin</span>' : ''}</div>
         <div class="hole-par">Par ${par ?? '–'}${HOLE_HANDICAPS[round.id] ? ` · Hcp ${HOLE_HANDICAPS[round.id][hole - 1]}` : ''}${par ? ` <span class="hole-max">Max ${par + MAX_OVER_PAR}</span>` : ''}</div></div>
-        <span class="badge ${isFront ? 'bb' : 'sg'}">${bracket ? (isFront ? 'Semis' : 'Finals') : isFront ? 'Best Ball' : 'Singles'}</span>
+        <span class="badge ${isFront ? 'bb' : 'sg'}">${badge}</span>
       </div>
       ${rows}
       ${canScore ? '' : `<p class="spectator-note">👀 Spectator view: only players enter scores.${ui.me ? '' : ' <button class="link" data-action="change-me">Are you a player?</button>'}</p>`}
       <div class="nav-row">
         <button class="btn ghost" data-action="hole" data-hole="${Math.max(1, hole - 1)}" ${hole === 1 ? 'disabled' : ''}>← Hole ${hole - 1 || ''}</button>
-        <button class="btn" data-action="hole" data-hole="${Math.min(18, hole + 1)}" ${hole === 18 ? 'disabled' : ''}>Hole ${hole < 18 ? hole + 1 : ''} →</button>
+        <button class="btn" data-action="hole" data-hole="${Math.min(last, hole + 1)}" ${hole === last ? 'disabled' : ''}>Hole ${hole < last ? hole + 1 : ''} →</button>
       </div>
     </div>
-    <div class="bc-wrap bc-mini">
-      <div class="bc-session"><span>${bracket ? (isFront ? 'Semifinals' : 'Final & 3rd place') : isFront ? 'Best ball match' : 'Singles matches'}</span><span>${groupTitle(round, ui.group)}</span></div>
-      ${segmentMatches.map((m) => broadcastCard(config, m, computeMatch(m, roundScores))).join('')
-        || '<div class="bc-next">The Final and 3rd place fill in when both semis finish. Scores entered now still count.</div>'}
-    </div>`;
+    ${below}`;
 }
 
 // ---------- Scorecards ----------
@@ -734,32 +982,33 @@ function scorecard(match, res, roundScores, pars) {
 // Traditional 18-hole card for the whole field, marked up like a paper card.
 function courseCard(config, round, roundScores) {
   const pars = config.pars?.[round.id] || {};
+  const [FRONT, BACK] = halvesOf(round);
   const sum = (holes, fn) => holes.reduce((a, h) => a + (fn(h) || 0), 0);
   const nine = (holes, fn, cls = '') => holes.map((h) => `<td class="${cls}">${fn(h)}</td>`).join('');
-  const parOut = sum(FRONT_NINE, (h) => pars[h]);
-  const parIn = sum(BACK_NINE, (h) => pars[h]);
+  const parOut = sum(FRONT, (h) => pars[h]);
+  const parIn = sum(BACK, (h) => pars[h]);
 
   const rows = round.groups.map((g, gi) => groupPlayers(config, g).map(({ id: p, team: t }, pi) => {
     const sc = roundScores[p] || {};
-    const played = [...FRONT_NINE, ...BACK_NINE].filter((h) => sc[h]);
-    const out = sum(FRONT_NINE, (h) => sc[h]);
-    const inn = sum(BACK_NINE, (h) => sc[h]);
+    const played = holesOf(round).filter((h) => sc[h]);
+    const out = sum(FRONT, (h) => sc[h]);
+    const inn = sum(BACK, (h) => sc[h]);
     const toPar = played.reduce((a, h) => a + sc[h] - (pars[h] || 0), 0);
     const toParTxt = !played.length ? '' : toPar === 0 ? 'E' : toPar > 0 ? `+${toPar}` : String(toPar);
     return `<tr class="${gi > 0 && pi === 0 ? 'group-start' : ''}">
       <th>${teamDot(t)}${esc(playerName(p))}</th>
-      ${nine(FRONT_NINE, (h) => marked(sc[h], pars[h]))}<td class="sub">${out || ''}</td>
-      ${nine(BACK_NINE, (h) => marked(sc[h], pars[h]))}<td class="sub">${inn || ''}</td>
+      ${nine(FRONT, (h) => marked(sc[h], pars[h]))}<td class="sub">${out || ''}</td>
+      ${nine(BACK, (h) => marked(sc[h], pars[h]))}<td class="sub">${inn || ''}</td>
       <td class="tot">${out + inn || ''}</td><td class="topar ${toPar < 0 ? 'under' : ''}">${toParTxt}</td>
     </tr>`;
   }).join('')).join('');
 
   return `<div class="card sc-card"><div class="sc-wrap"><table class="sc full">
-    <thead><tr><th>Hole</th>${FRONT_NINE.map((h) => `<th>${h}</th>`).join('')}<th>Out</th>
-      ${BACK_NINE.map((h) => `<th>${h}</th>`).join('')}<th>In</th><th>Tot</th><th>±</th></tr></thead>
+    <thead><tr><th>Hole</th>${FRONT.map((h) => `<th>${h}</th>`).join('')}<th>Out</th>
+      ${BACK.map((h) => `<th>${h}</th>`).join('')}<th>In</th><th>Tot</th><th>±</th></tr></thead>
     <tbody>
-      <tr class="par-row"><th>Par</th>${nine(FRONT_NINE, (h) => pars[h] ?? '')}<td class="sub">${parOut}</td>
-        ${nine(BACK_NINE, (h) => pars[h] ?? '')}<td class="sub">${parIn}</td><td class="tot">${parOut + parIn}</td><td></td></tr>
+      <tr class="par-row"><th>Par</th>${nine(FRONT, (h) => pars[h] ?? '')}<td class="sub">${parOut}</td>
+        ${nine(BACK, (h) => pars[h] ?? '')}<td class="sub">${parIn}</td><td class="tot">${parOut + parIn}</td><td></td></tr>
       ${rows}
     </tbody></table></div></div>`;
 }
@@ -769,20 +1018,20 @@ function renderCards() {
   const { scores } = store;
   const round = currentRound();
   if (!round) return '<p class="empty">No rounds enabled.</p>';
+  const title = `<h2>${esc(round.course)} · ${esc(round.day)}</h2>`;
   if (round.pending) {
-    return `${roundChips(round.id)}<h2>${esc(round.course)} · ${esc(round.day)}</h2>
-      ${courseCard(config, round, {})}${pendingNote(config, round)}`;
+    return `${roundChips(round.id)}${title}${courseCard(config, { ...round, groups: [] }, {})}${pendingNote(config, round)}`;
   }
   const roundScores = scores[round.id] || {};
   const pars = config.pars?.[round.id];
   const matches = buildMatches(config).filter((m) => m.roundId === round.id);
-
-  return `
-    ${roundChips(round.id)}
-    <h2>${esc(round.course)} · ${esc(round.day)}</h2>
-    ${courseCard(config, round, roundScores)}
-    ${LEGEND}
-    <h2>Match cards</h2>
+  let extra = '';
+  if (round.format === 'stroke') {
+    extra = captainBoard(config);
+  } else if (round.format === 'teamstroke') {
+    extra = `<h2>Team totals</h2><div class="bc-wrap">${matches.map((m) => strokeCard(config, m, computeMatch(m, roundScores))).join('')}</div>`;
+  } else {
+    extra = `<h2>Match cards</h2>
     ${round.groups.map((g, gi) => `
       <h3>${groupTitle(round, gi)} · ${groupLabel(config, g)}</h3>
       ${matches.filter((m) => m.group === gi).map((m) => {
@@ -790,6 +1039,13 @@ function renderCards() {
         return `<div class="card sc-card">${matchCard(m, res, { compact: true })}${scorecard(m, res, roundScores, pars)}</div>`;
       }).join('')}`).join('')}
     <div class="legend"><span><span class="mk counted-swatch">4</span> Counted for best ball</span><span>Max score: triple bogey</span></div>`;
+  }
+  return `
+    ${roundChips(round.id)}
+    ${title}
+    ${courseCard(config, round, roundScores)}
+    ${LEGEND}
+    ${extra}`;
 }
 
 // ---------- Trip ----------
@@ -821,9 +1077,19 @@ function renderTrip() {
 
 function renderSetup() {
   const { config } = store;
-  const matchupLabel = ([a, b]) => `${esc(config.teams[a].name)} v ${esc(config.teams[b].name)}`;
-  const currentMatchup = (r) => MATCHUPS.findIndex(([g1]) => r.groups.some((g) => (
-    g.teams.includes(g1[0]) && g.teams.includes(g1[1]))));
+  const d = draft;
+  const name = (p) => esc(playerName(p));
+  const chip = (kind, a, b, pid) => `<button class="player-chip ${pickedSlot?.kind === kind && pickedSlot.a === a && pickedSlot.b === b ? 'picked' : ''}"
+    data-action="pick-player" data-kind="${kind}" data-a="${a}" data-b="${b}">${name(pid)}</button>`;
+  const manual = config.draft?.captains || [];
+  const fri = config.rounds.find((r) => r.format === 'stroke');
+
+  const draftStatus = d.stage === 'captains'
+    ? (d.cr?.allDone ? 'Tied for a captain spot: waiting on the putt-off.' : "Waiting on Friday's scores.")
+    : `Captains: <b>${name(d.captains[0])}</b> (picks first) and <b>${name(d.captains[1])}</b>${d.manual ? ' · set by hand' : ' · from Friday'}.
+      ${d.stage === 'done' ? 'Draft complete.' : `${d.picks.length} of ${PLAYER_IDS.length - 2} picks made.`}`;
+
+  const tuePairs = config.tuePicks?.pairs || [];
 
   return `
     <div class="card admin-note">
@@ -831,47 +1097,62 @@ function renderSetup() {
       <button class="btn ghost" data-action="tab" data-tab="recap">Preview trip recap</button>
     </div>
 
+    <h2>Captains &amp; draft</h2>
+    <div class="card">
+      <p class="setup-p">${draftStatus}</p>
+      <p class="note">Set the captains by hand (say, if Friday gets rained out): tap the one who picks first, then the other.</p>
+      <div class="cap-grid">${PLAYERS.map((p) => {
+        const i = manual.indexOf(p.id);
+        return `<button class="player-chip ${i >= 0 ? 'picked' : ''}" data-action="captain-set" data-player="${p.id}">${esc(p.name)}${i >= 0 ? ` <small>${i === 0 ? '1st' : '2nd'}</small>` : ''}</button>`;
+      }).join('')}</div>
+      <div class="setup-actions">
+        ${manual.length ? '<button class="link" data-action="captain-auto">Use Friday\'s scores instead</button>' : ''}
+        ${d.picks?.length ? '<button class="link" data-action="draft-undo">Undo last pick</button>' : ''}
+        ${d.picks?.length || config.teams.length ? '<button class="link danger" data-action="draft-reset">Reset the draft</button>' : ''}
+      </div>
+    </div>
+
     <h2>Teams</h2>
-    <p class="note">Tap a player, then tap another player to swap them. Changes save for everyone right away.</p>
+    ${config.teams.length === 2 ? `<p class="note">Tap a player, then another to swap them (across teams, or within a team to change the order: the first player is the captain, and the order sets the Sat–Mon rotation). Changes save for everyone right away.</p>
     ${config.teams.map((t, ti) => `
       <div class="card setup-team" style="--team:${teamColor(ti)}">
-        <input type="text" value="${esc(t.name)}" data-edit="team-name" data-team="${ti}" aria-label="Team name" enterkeyhint="done">
-        <div class="two">${t.players.map((pid, si) => `
-          <button class="player-chip ${pickedSlot?.team === ti && pickedSlot?.slot === si ? 'picked' : ''}"
-            data-action="pick-player" data-team="${ti}" data-slot="${si}">${esc(playerName(pid))}</button>`).join('')}</div>
-      </div>`).join('')}
+        <input type="text" id="setup-team-${ti}" value="${esc(t.name)}" data-edit="team-name" data-team="${ti}" aria-label="Team name" enterkeyhint="done">
+        <div class="swatches">${TEAM_COLORS.map((c) => `<button class="sw ${t.color === c ? 'on' : ''}" style="--sw:${c}" data-action="team-color" data-team="${ti}" data-color="${c}"
+          ${config.teams[1 - ti].color === c ? 'disabled' : ''} aria-label="Color"></button>`).join('')}</div>
+        <div class="four">${t.players.map((pid, si) => chip('team', ti, si, pid)).join('')}</div>
+      </div>`).join('')}` : '<div class="card"><p class="muted">Set by the draft.</p></div>'}
 
-    <h2>Daily matchups</h2>
-    <p class="note">Each group plays best ball on the front 9, then two singles matches on the back 9.</p>
+    <h2>Friday groups</h2>
+    <p class="note">${esc(fri?.course || '')}: tap a player, then another to swap groups.</p>
+    <div class="card"><div class="two">${(fri?.groups || []).map((g, gi) => `<div>
+      <div class="setup-sub">Group ${gi + 1}</div>
+      <div class="stack">${g.players.map((pid, si) => chip('fri', gi, si, pid)).join('')}</div>
+    </div>`).join('')}</div></div>
+
+    <h2>Rounds</h2>
     ${config.rounds.map((r, ri) => {
-      const cur = currentMatchup(r);
       const resolved = view.rounds[ri];
-      return `
-      <div class="card setup-round ${r.enabled ? '' : 'off'}">
-        <label class="toggle"><input type="checkbox" data-edit="round-enabled" data-round="${ri}" ${r.enabled ? 'checked' : ''}>
-          <b>${esc(r.day)}</b><span class="muted">counts toward the tournament</span></label>
-        <input type="text" value="${esc(r.course)}" data-edit="round-course" data-round="${ri}" aria-label="Course" enterkeyhint="done">
-        ${r.format === 'bracket' ? `<div class="seeded">
-            <b>Bracket Day:</b> singles brackets A &amp; B, seeded from the standings. Teams pick their A/B players on the
-            Leaderboard (4th seed first). Semis 1 v 4 and 2 v 3; Final ${BRACKET_POINTS.final} pts, 3rd place ${BRACKET_POINTS.third}.
-            ${Object.keys(config.bracketPicks || {}).length ? `<div>Picks: ${Object.entries(config.bracketPicks).map(([t, p]) => `${esc(config.teams[t]?.name)} A = ${esc(playerName(p))}`).join(' · ')}</div>
-              <button class="link" data-action="bracket-reset">Reset bracket picks</button>` : ''}</div>`
-          : r.seeded ? `<div class="seeded">
-            <b>Seeded from the standings</b> after the earlier rounds: 1st v 2nd, 3rd v 4th.
-            <button class="link" data-action="seeded" data-round="${ri}" data-on="0">Pick matchups instead</button></div>`
-          : `<div class="matchups">${MATCHUPS.map((m, mi) => `
-          <button class="${mi === cur ? 'on' : ''}" data-action="matchup" data-round="${ri}" data-m="${mi}">
-            <span>${matchupLabel(m[0])}</span><span>${matchupLabel(m[1])}</span></button>`).join('')}</div>
-          ${ri === config.rounds.length - 1 ? `<button class="link seed-link" data-action="seeded" data-round="${ri}" data-on="1">Seed from standings instead</button>` : ''}`}
-        ${r.format === 'bracket' ? ''
-          : resolved.pending ? '<div class="singles-line">Singles: TBD until the matchups are set.</div>'
-          : resolved.groups.map((g, gi) => {
-          const [a, b] = g.teams.map((t) => config.teams[t]);
+      let detail = '';
+      if (r.format === 'match' && !resolved.pending) {
+        detail = resolved.groups.map((g, gi) => {
           const pairs = g.cross ? [[0, 1], [1, 0]] : [[0, 0], [1, 1]];
-          return `<div class="singles-line">${r.seeded ? groupTitle(r, gi) : `Group ${gi + 1}`} singles:
-            <b>${pairs.map(([pa, pb]) => `${esc(playerName(a.players[pa]))} v ${esc(playerName(b.players[pb]))}`).join(' · ')}</b>
+          return `<div class="singles-line">Group ${gi + 1}: best ball <b>${g.a.map(name).join(' & ')}</b> v <b>${g.b.map(name).join(' & ')}</b>
+            · singles <b>${pairs.map(([pa, pb]) => `${name(g.a[pa])} v ${name(g.b[pb])}`).join(', ')}</b>
             <button class="link" data-action="cross" data-round="${ri}" data-group="${gi}">Swap</button></div>`;
-        }).join('')}
+        }).join('');
+      } else if (r.format === 'escalating') {
+        detail = `<div class="singles-line">${tuePairs.length === 4 ? `Matchups set: <b>${tuePairs.map(([x, y]) => `${name(x)} v ${name(y)}`).join(', ')}</b>
+          <button class="link" data-action="tue-reset">Reset</button>` : resolved.needsPicks ? `Waiting on ${esc(teamName(config, resolved.leader))} to set the matchups.` : 'Set by the leader after Monday.'}</div>`;
+      } else if (r.format === 'teamstroke') {
+        detail = `<div class="singles-line">Team stroke play, ${TEAMSTROKE_POINTS} pts. Groups are Gamble Sands' groups.</div>`;
+      } else if (r.format === 'stroke') {
+        detail = '<div class="singles-line">Captain Round: no points, no skins.</div>';
+      }
+      return `<div class="card setup-round ${r.enabled ? '' : 'off'}">
+        <label class="toggle"><input type="checkbox" data-edit="round-enabled" data-round="${ri}" ${r.enabled ? 'checked' : ''}>
+          <b>${esc(r.day)}</b><span class="muted">${esc(FORMAT_LABELS[r.format])}${r.skins ? ' · skins' : ''}</span></label>
+        <input type="text" id="setup-course-${ri}" value="${esc(r.course)}" data-edit="round-course" data-round="${ri}" aria-label="Course" enterkeyhint="done">
+        ${detail}
       </div>`;
     }).join('')}
 
@@ -899,7 +1180,7 @@ function scheduleAdvance(round, wasComplete) {
   const hole = ui.hole;
   const justFinished = !wasComplete && groupHoleComplete(round, hole);
   if (!justFinished && advancePending !== hole) return;
-  if (hole >= 18 || !groupHoleComplete(round, hole)) { advancePending = null; return; }
+  if (hole >= holesOf(round).length || !groupHoleComplete(round, hole)) { advancePending = null; return; }
   advancePending = hole;
   advanceTimer = setTimeout(() => {
     advancePending = null;
@@ -965,7 +1246,15 @@ function highlightText(config, h) {
     case 'birdie': return [`🐦 ${who} birdied`, `${where} · ${h.score} on a par ${h.par}`];
     case 'birdieRun': return [`🔥 ${who}: ${h.n} birdies in a row!`, `#${h.hole - h.n + 1}–${h.hole} · ${esc(roundName(config, h.roundId))}`];
     case 'holeRun': return [`🔥 ${side(h.match, h.side)} won ${h.n} straight holes`, `vs ${side(h.match, 1 - h.side)} · thru #${h.hole}`];
+    case 'skin': return [`💰 ${who} wins the skin: ${h.score} on the par ${h.par}`, `${where} · $${SKIN_STAKE * (PLAYER_IDS.length - 1)}`];
+    case 'captains': return [`🎖️ Your captains: ${esc(playerName(h.captains[0]))} & ${esc(playerName(h.captains[1]))}`,
+      `${esc(playerName(h.captains[0]))} picks first · ${esc(roundName(config, h.roundId))}`];
     case 'matchFinal': {
+      if (h.match.type === 'teamstroke') {
+        const tn = (si) => esc(teamName(config, h.match.sides[si].team));
+        if (h.res.leader === null) return [`🤝 ${tn(0)} and ${tn(1)} tie at ${esc(roundName(config, h.roundId))}`, `${TEAMSTROKE_POINTS / 2} pt each`];
+        return [`🏁 ${tn(h.res.leader)} win ${esc(roundName(config, h.roundId))} by ${h.res.up}`, `Team stroke play · ${TEAMSTROKE_POINTS} pts`];
+      }
       const kind = h.match.type === 'bestball' ? 'best ball' : 'singles';
       if (h.res.leader === null) return [`🤝 ${side(h.match, 0)} and ${side(h.match, 1)} halve their ${kind} match`, esc(roundName(config, h.roundId))];
       const w = h.res.leader;
@@ -1022,7 +1311,7 @@ function highlightCard(config, h) {
 function renderFeed() {
   const config = view;
   const round = currentRound();
-  const hl = highlights(config, store.scores, store.scoreTimes);
+  const hl = [...highlights(config, store.scores, store.scoreTimes, PLAYER_IDS), ...extraHighlights(config)];
   const filter = ui.feedFilter || 'all';
   let items = [
     ...store.posts.map((p) => ({ kind: 'post', at: p.at, p })),
@@ -1046,7 +1335,7 @@ function renderFeed() {
           <input type="file" id="media-input" accept="image/*,video/*" multiple hidden ${posting ? 'disabled' : ''}></label>
         <select id="post-hole" data-draft="hole" aria-label="Tag a hole">
           <option value="">${round ? `Tag a hole (${esc(round.course)})` : 'No tag'}</option>
-          ${round ? [...FRONT_NINE, ...BACK_NINE].map((h) => `<option value="${h}" ${String(drafts.hole) === String(h) ? 'selected' : ''}>Hole ${h}</option>`).join('') : ''}
+          ${round ? holesOf(round).map((h) => `<option value="${h}" ${String(drafts.hole) === String(h) ? 'selected' : ''}>Hole ${h}</option>`).join('') : ''}
         </select>
         <button class="btn small" data-action="post" ${posting || (!drafts.post?.trim() && !pendingMedia.length) ? 'disabled' : ''}>Post</button>
       </div>
@@ -1061,6 +1350,24 @@ function renderFeed() {
     ${items.length ? items.slice(0, limit).map((i) => (i.kind === 'post' ? postCard(config, i.p) : highlightCard(config, i.h))).join('')
       : `<p class="empty">${filter === 'highlights' ? 'Birdies, streaks and match results show up here automatically.' : 'Nothing yet. Post the first photo!'}</p>`}
     ${items.length > limit ? '<button class="btn ghost more" data-action="feed-more">Show more</button>' : ''}`;
+}
+
+// Feed items the scoring module doesn't know about: skins won and the
+// captains, timed to when the deciding score went in.
+function extraHighlights(config) {
+  const times = store.scoreTimes;
+  const at = (roundId, players, hole) => Math.max(0, ...players.map((p) => times?.[roundId]?.[p]?.[hole] || 0));
+  const items = computeSkins(config, store.scores, PLAYER_IDS, SKIN_STAKE).holes.filter((h) => h.winner).map((h) => ({
+    id: `hl-skin-${h.roundId}-${h.hole}`, type: 'skin', player: h.winner, score: h.score, par: h.par,
+    roundId: h.roundId, hole: h.hole, at: at(h.roundId, PLAYER_IDS, h.hole),
+  }));
+  const cr = draft.cr;
+  if (draft.captains && cr?.allDone && !draft.manual) {
+    const ids = cr.rows.map((r) => r.id);
+    const last = Math.max(0, ...ids.map((p) => Math.max(0, ...Object.values(times?.[cr.round.id]?.[p] || {}))));
+    items.push({ id: `hl-captains-${draft.captains.join('-')}`, type: 'captains', captains: draft.captains, roundId: cr.round.id, at: last });
+  }
+  return items;
 }
 
 async function submitPost() {
@@ -1111,11 +1418,12 @@ function renderRecap() {
   const { scores } = store;
   const final = tripFinal(config, scores);
   const rounds = enabledRounds(config);
-  const allIds = rounds.map((r) => r.id);
+  const allIds = rounds.filter((r) => r.format !== 'stroke').map((r) => r.id);
   const { ranked } = rankTeams(config, scores, allIds, 'final');
   const standings = computeStandings(config, scores);
-  const birdies = birdieCounts(config, scores);
-  const pids = config.teams.flatMap((t) => t.players);
+  const birdies = birdieCounts(config, scores, PLAYER_IDS);
+  const pids = PLAYER_IDS;
+  const skins = computeSkins(config, scores, PLAYER_IDS, SKIN_STAKE);
   const reactCount = (id) => Object.values(store.social[id]?.r || {}).reduce((a, l) => a + l.length, 0);
 
   // Awards, worked out from the scores and the feed.
@@ -1135,12 +1443,14 @@ function renderRecap() {
   }
   const posts = store.posts;
   const crowd = [...posts].sort((a, b) => reactCount(`p-${b.id}`) - reactCount(`p-${a.id}`))[0];
+  const skinsKing = top(pids, (p) => skins.net[p]);
   const paparazzi = top(pids, (p) => posts.filter((x) => x.by === p).reduce((a, x) => a + (x.media?.length || 0), 0));
   const names = (list) => list.map((p) => esc(playerName(p))).join(' & ');
 
   const awards = [
     mvp && ['🎖️', 'MVP', names(mvp.who), `${fmtPts(mvp.best)} match points`],
     birdieKing && ['🐦', 'Birdie King', names(birdieKing.who), `${birdieKing.best} birdies`],
+    skinsKing && ['💰', 'Skins King', names(skinsKing.who), `${fmtMoney(skinsKing.best)} in skins`],
     lowRound && ['⛳', 'Low Round', esc(playerName(lowRound.p)), `${lowRound.gross} (${lowRound.gross - lowRound.par >= 0 ? '+' : ''}${lowRound.gross - lowRound.par}) at ${esc(lowRound.course)}`],
     hottest?.best >= 2 && ['🔥', 'Hottest Hand', names(hottest.who), `${hottest.best} birdies in a row`],
     runBest?.n >= 3 && ['💪', 'Longest Run', esc(sideLabel(runBest.m.sides[runBest.side])), `won ${runBest.n} straight holes`],
@@ -1152,13 +1462,13 @@ function renderRecap() {
     .sort((a, b) => b.score - a.score).slice(0, 9);
   const champ = ranked[0];
 
-  const playerCards = pids.map((p) => ({ p, s: standings.players[p] }))
+  const playerCards = pids.map((p) => ({ p, s: standings.players[p] || { points: 0, w: 0, l: 0, h: 0, team: -1 } }))
     .sort((a, b) => b.s.points - a.s.points)
     .map(({ p, s }) => {
       const totals = roundTotals(config, scores, p).filter((r) => r.holes);
       const best = totals.filter((r) => r.holes === 18).sort((a, b) => a.gross - b.gross)[0];
       return `<div class="card recap-player" style="--team:${teamColor(s.team)}">
-        <div class="rp-head">${avatar(p, config)}<b>${esc(playerName(p))}</b><span class="muted">${esc(config.teams[s.team].name)}</span>
+        <div class="rp-head">${avatar(p, config)}<b>${esc(playerName(p))}</b><span class="muted">${s.team >= 0 ? esc(teamName(config, s.team)) : ''}</span>
           <span class="rp-pts">${fmtPts(s.points)} pts</span></div>
         <div class="rp-stats"><span>${s.w}-${s.l}-${s.h}</span><span>🐦 ${birdies[p]?.birdies || 0}</span>
           ${best ? `<span>Best ${best.gross} (${esc(best.day.split(' ')[0])})</span>` : ''}</div>
@@ -1166,9 +1476,9 @@ function renderRecap() {
       </div>`;
     }).join('');
 
-  const days = rounds.filter((r) => !r.pending).map((r) => {
+  const days = rounds.filter((r) => !r.pending && r.format !== 'stroke').map((r) => {
     const day = rankTeams(config, scores, [r.id]).ranked;
-    return `<div class="kv"><span><b>${esc(r.day.split(' ')[0])}</b> ${esc(r.course)}</span>
+    return `<div class="kv"><span><b>${roundDay(r)}</b> ${esc(r.course)}</span>
       <span class="day-pts">${day.map((t) => `${teamDot(t.idx)}${fmtPts(t.points)}`).join(' ')}</span></div>`;
   }).join('');
 
@@ -1177,7 +1487,7 @@ function renderRecap() {
     <div class="recap-hero">
       <div class="rh-kicker">Buckle Up · ${esc(TRIP.dates)}</div>
       <div class="rh-title">Trip Recap</div>
-      ${champ && final && !champ.unresolved ? `<div class="rh-champ">🏆 ${esc(champ.name)} · ${champ.players.map(playerName).join(' & ')}</div>` : ''}
+      ${champ && final && !champ.unresolved ? `<div class="rh-champ">🏆 ${esc(champ.name)} · ${champ.players.map(playerName).join(', ')}</div>` : ''}
       <button class="btn ghost small" data-action="share-recap">Share</button>
     </div>
     <h2>Final standings</h2>
@@ -1185,7 +1495,7 @@ function renderRecap() {
       <div class="team-row ${final && i === 0 && !t.unresolved ? 'winner' : ''}" style="--team:${teamColor(t.idx)}">
         <div class="rank">${final && i === 0 && !t.unresolved ? '🏆' : t.rank}</div>
         <div class="team-info"><div class="team-name">${esc(t.name)}</div>
-          <div class="team-players">${t.players.map(playerName).join(' & ')}</div></div>
+          <div class="team-players">${t.players.map(playerName).join(', ')}</div></div>
         <div class="big-pts">${fmtPts(t.points)}</div></div>`).join('')}</div>
     <h2>Awards</h2>
     <div class="awards">${awards.length ? awards.map(([icon, title, who, why]) => `
@@ -1227,6 +1537,8 @@ function namePicker() {
 let seenFinals = null;
 let seenChampion = null;
 let seenAces = null;
+let seenCaptains = null;
+let seenPicks = null;
 const celebrations = [];
 
 function checkForFinishes() {
@@ -1239,7 +1551,8 @@ function checkForFinishes() {
     if (seenFinals && !seenFinals.has(m.id)) fresh.push({ m, res });
   }
   const final = tripFinal(view, store.scores);
-  const champ = final ? rankTeams(view, store.scores, enabledRounds(view).map((r) => r.id), 'final').ranked[0] : null;
+  const scoringIds = enabledRounds(view).filter((r) => r.format !== 'stroke').map((r) => r.id);
+  const champ = final ? rankTeams(view, store.scores, scoringIds, 'final').ranked[0] : null;
   const champKey = champ && !champ.unresolved ? champ.idx : null;
   if (seenFinals) {
     fresh.forEach(({ m, res }) => celebrations.push(matchBanner(m, res)));
@@ -1262,6 +1575,29 @@ function checkForFinishes() {
       }
     }
   }
+  // Friday: the captain reveal, then every draft pick as it happens.
+  const capKey = draft.captains ? draft.captains.join('-') : '';
+  const picks = draft.picks || [];
+  if (seenFinals) {
+    if (capKey && capKey !== seenCaptains) {
+      celebrations.push({
+        color: '#b8860b', kicker: draft.manual ? 'The Draft' : `Captain Round · ${esc(draft.cr?.round.course || '')}`,
+        title: 'Your captains', score: '🎖️', big: true,
+        sub: `<b>${esc(playerName(draft.captains[0]))}</b> & <b>${esc(playerName(draft.captains[1]))}</b><br>${esc(playerName(draft.captains[0]))} picks first`,
+      });
+    }
+    picks.slice(seenPicks?.length || 0).forEach((p, i) => {
+      const n = (seenPicks?.length || 0) + i;
+      const team = n % 2;
+      celebrations.push({
+        color: store.config.teams?.[team]?.color || TEAM_COLORS[team], kicker: `The Draft · Pick ${n + 1}`,
+        title: `${esc(playerName(draft.captains[team]))} picks`, score: esc(playerName(p)),
+        sub: draft.stage === 'done' && n === picks.length - 1 ? 'The teams are set!' : '',
+      });
+    });
+  }
+  seenCaptains = capKey;
+  seenPicks = picks;
   seenAces = aces;
   seenFinals = finals;
   seenChampion = champKey;
@@ -1270,8 +1606,15 @@ function checkForFinishes() {
 
 function matchBanner(m, res) {
   const round = view.rounds.find((r) => r.id === m.roundId);
-  const kind = `${round?.day.split(' ')[0] || ''} · ${m.type === 'bestball' ? 'Best Ball' : 'Singles'}`;
+  const kind = `${round ? roundDay(round) : ''} · ${m.type === 'teamstroke' ? esc(round?.course || '') : esc(matchKind(m).split(' · ')[0])}`;
   const names = (si) => esc(sideLabel(m.sides[si]));
+  if (m.type === 'teamstroke') {
+    if (res.leader === null) return { color: '#6b7568', kicker: kind, title: 'Tied', score: '1 – 1', sub: `${names(0)} and ${names(1)}` };
+    return {
+      color: teamColor(m.sides[res.leader].team), kicker: kind, title: `${names(res.leader)} win`,
+      score: `By ${res.up}`, sub: `${TEAMSTROKE_POINTS} points`,
+    };
+  }
   if (res.leader === null) {
     return { color: '#6b7568', kicker: kind, title: 'Halved', score: '½ – ½', sub: `${names(0)} and ${names(1)}` };
   }
@@ -1284,8 +1627,8 @@ function matchBanner(m, res) {
 
 function championBanner(team) {
   return {
-    color: teamColor(team.idx), kicker: 'Buckle Up · Final', title: `${esc(team.name)} are the champions`,
-    score: '🏆', sub: esc(team.players.map(playerName).join(' & ')), big: true,
+    color: teamColor(team.idx), kicker: 'Buckle Up · Final', title: `${esc(team.name)} win the Cup`,
+    score: '🏆', sub: esc(team.players.map(playerName).join(', ')), big: true,
   };
 }
 
@@ -1329,8 +1672,6 @@ const TABS = [
 // Reached from the champion banner, the Trip tab or a #recap link.
 const HIDDEN_TABS = [['recap', '', 'Recap', renderRecap]];
 
-const isAdmin = () => ui.me === ORGANIZER;
-
 function render() {
   // Don't yank a video someone is watching; re-render when it stops.
   if ([...app.querySelectorAll('video')].some((v) => !v.paused && !v.ended)) {
@@ -1339,6 +1680,7 @@ function render() {
   }
   renderQueued = false;
   view = resolveConfig(store.config, store.scores);
+  draft = draftState(store.config, store.scores, PLAYER_IDS);
   checkForFinishes();
   if (ui.tab === 'cards') { // Cards moved into Scores
     ui.tab = 'scores';
@@ -1452,11 +1794,12 @@ app.addEventListener('click', async (e) => {
     case 'go-scores': {
       // Jump to the first hole this player hasn't scored yet in that round.
       const sc = store.scores[el.dataset.round]?.[ui.me] || {};
+      const goRound = view.rounds.find((r) => r.id === el.dataset.round);
       ui.tab = 'scores';
       ui.scoresView = 'enter';
       ui.roundId = el.dataset.round;
       ui.group = Number(el.dataset.group);
-      ui.hole = [...FRONT_NINE, ...BACK_NINE].find((h) => !sc[h]) || 18;
+      ui.hole = holesOf(goRound).find((h) => !sc[h]) || holesOf(goRound).length;
       window.scrollTo(0, 0);
       break;
     }
@@ -1511,45 +1854,121 @@ app.addEventListener('click', async (e) => {
       return;
     }
     case 'pick-player': {
-      const slot = { team: Number(el.dataset.team), slot: Number(el.dataset.slot) };
-      if (!pickedSlot || (pickedSlot.team === slot.team && pickedSlot.slot === slot.slot)) {
-        pickedSlot = pickedSlot ? null : slot;
+      // Setup swaps: players between teams (or reordered within one), and Friday groups.
+      const slot = { kind: el.dataset.kind, a: Number(el.dataset.a), b: Number(el.dataset.b) };
+      const same = pickedSlot && pickedSlot.kind === slot.kind && pickedSlot.a === slot.a && pickedSlot.b === slot.b;
+      if (!pickedSlot || same || pickedSlot.kind !== slot.kind) {
+        pickedSlot = same ? null : slot;
         break;
       }
-      const a = pickedSlot;
+      const first = pickedSlot;
       pickedSlot = null;
       saveSetup((c) => {
-        const pa = c.teams[a.team].players[a.slot];
-        c.teams[a.team].players[a.slot] = c.teams[slot.team].players[slot.slot];
-        c.teams[slot.team].players[slot.slot] = pa;
+        const list = (x) => (x.kind === 'team' ? c.teams[x.a].players : c.rounds.find((r) => r.format === 'stroke').groups[x.a].players);
+        const p1 = list(first)[first.b];
+        list(first)[first.b] = list(slot)[slot.b];
+        list(slot)[slot.b] = p1;
       });
       return;
     }
-    case 'matchup': {
-      const { round: ri, m } = el.dataset;
+    case 'captain-set': {
+      const pid = el.dataset.player;
+      if ((draft.picks?.length || store.config.teams.length) && !confirm('Changing the captains resets the draft. Keep going?')) return;
       saveSetup((c) => {
-        c.rounds[ri].groups = MATCHUPS[m].map((teams, gi) => ({ teams, cross: !!c.rounds[ri].groups[gi]?.cross }));
+        const caps = c.draft.captains.includes(pid) ? c.draft.captains.filter((p) => p !== pid)
+          : c.draft.captains.length >= 2 ? [pid] : [...c.draft.captains, pid];
+        c.draft.captains = caps;
+        c.draft.picks = [];
+        c.teams = [];
+        c.tuePicks = { pairs: [] };
       });
       return;
     }
-    case 'seeded': {
-      const { round: ri, on } = el.dataset;
-      saveSetup((c) => { c.rounds[ri].seeded = on === '1'; });
+    case 'captain-auto':
+      saveSetup((c) => { c.draft.captains = []; });
+      return;
+    case 'draft-pick': {
+      const d = draft;
+      const pid = el.dataset.player;
+      if (d.stage !== 'drafting' || !d.pool.includes(pid)) return;
+      if (!isAdmin() && ui.me !== d.captains[d.turn]) return;
+      if (!confirm(`Draft ${playerName(pid)} to Team ${playerName(d.captains[d.turn])}?`)) return;
+      const turn = d.turn;
+      store.updateConfig((c) => {
+        const now = draftState(c, store.scores, PLAYER_IDS);
+        if (now.stage !== 'drafting' || now.turn !== turn || !now.pool.includes(pid)) throw new Error('taken');
+        c.draft.picks = [...now.picks, pid];
+        const after = draftState(c, store.scores, PLAYER_IDS);
+        // Last pick: the teams are set, named after the captains until they rename them.
+        if (after.stage === 'done') {
+          c.teams = after.rosters.map((players, i) => ({ name: `Team ${playerName(players[0])}`, color: TEAM_COLORS[i], players }));
+        }
+      }).catch((err) => {
+        if (err.message === 'taken') alert('That pick just changed on another phone. Take another look.');
+        else showError(err);
+      });
       return;
     }
-    case 'bracket-pick': {
+    case 'draft-undo':
+      if (!isAdmin() || !confirm('Undo the last draft pick?')) return;
+      saveSetup((c) => {
+        c.draft.picks = draft.picks.slice(0, -1);
+        c.teams = [];
+        c.tuePicks = { pairs: [] };
+      });
+      return;
+    case 'draft-reset':
+      if (!confirm('Reset the draft? This clears every pick and the teams.')) return;
+      saveSetup((c) => {
+        c.draft.picks = [];
+        c.teams = [];
+        c.tuePicks = { pairs: [] };
+      });
+      return;
+    case 'team-color': {
       const t = Number(el.dataset.team);
-      const r = enabledRounds(view).find((x) => x.needsPicks);
-      const allowed = ui.me === ORGANIZER || (isPlayer() && teamOf(view, ui.me) === t);
-      if (!r || r.pickTurn !== t || !allowed) return;
-      const name = playerName(el.dataset.player);
-      if (!confirm(`Lock in ${name} for Bracket A? Their partner goes to Bracket B.`)) return;
-      saveSetup((c) => { (c.bracketPicks ||= {})[t] = el.dataset.player; });
+      if (!isAdmin() && ui.me !== captainOf(store.config, t)) return;
+      saveSetup((c) => { if (c.teams[t]) c.teams[t].color = el.dataset.color; });
       return;
     }
-    case 'bracket-reset':
-      if (!confirm('Clear every team\'s bracket picks?')) return;
-      saveSetup((c) => { c.bracketPicks = {}; });
+    case 'cap-puttoff': {
+      if (!isPlayer()) return;
+      const { key, player } = el.dataset;
+      saveSetup((c) => {
+        const list = ((c.puttoffs ||= {}).captain ||= {})[key] ||= [];
+        if (!list.includes(player)) list.push(player);
+      });
+      return;
+    }
+    case 'cap-puttoff-reset':
+      saveSetup((c) => { ((c.puttoffs ||= {}).captain ||= {})[el.dataset.key] = []; });
+      return;
+    case 'tue-sel': {
+      const t = Number(el.dataset.team);
+      tueSel.pick[t] = tueSel.pick[t] === el.dataset.player ? null : el.dataset.player;
+      if (tueSel.pick[0] && tueSel.pick[1] && tueSel.pairs.length < 4) {
+        tueSel.pairs.push([tueSel.pick[0], tueSel.pick[1]]);
+        tueSel.pick = [null, null];
+      }
+      break;
+    }
+    case 'tue-undo':
+      if (tueSel.pick[0] || tueSel.pick[1]) tueSel.pick = [null, null];
+      else tueSel.pairs.pop();
+      break;
+    case 'tue-lock': {
+      const r = enabledRounds(view).find((x) => x.needsPicks);
+      if (!r || tueSel.pairs.length !== 4) return;
+      if (!isAdmin() && ui.me !== captainOf(view, r.leader)) return;
+      if (!confirm("Lock in Tuesday's matchups? Everyone sees them right away.")) return;
+      const pairs = tueSel.pairs.map((p) => [...p]);
+      tueSel = { pairs: [], pick: [null, null] };
+      saveSetup((c) => { c.tuePicks = { pairs }; });
+      return;
+    }
+    case 'tue-reset':
+      if (!confirm("Clear Tuesday's matchups so the leader can set them again?")) return;
+      saveSetup((c) => { c.tuePicks = { pairs: [] }; });
       return;
     case 'puttoff': {
       if (!isPlayer()) return;
@@ -1613,8 +2032,9 @@ app.addEventListener('change', (e) => {
   }
   const { edit, team, round } = el.dataset;
   if (!edit) return;
+  if (edit === 'team-name' && !isAdmin() && ui.me !== captainOf(store.config, Number(team))) return;
   saveSetup((c) => {
-    if (edit === 'team-name') c.teams[team].name = el.value.trim() || `Team ${Number(team) + 1}`;
+    if (edit === 'team-name' && c.teams[team]) c.teams[team].name = el.value.trim() || `Team ${playerName(c.teams[team].players[0])}`;
     if (edit === 'round-enabled') c.rounds[round].enabled = el.checked;
     if (edit === 'round-course') c.rounds[round].course = el.value.trim() || c.rounds[round].course;
   });

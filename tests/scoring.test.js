@@ -3,31 +3,58 @@ import assert from 'node:assert/strict';
 import {
   buildMatches, computeMatch, computeStandings, sideScore, scoreMark, birdieCounts, rankTeams, resolveConfig,
   matchStreak, birdieStreak, highlights, longestBirdieRun, longestMatchRun,
+  captainRound, draftState, computeSkins, settleUp, roundPoints,
 } from '../js/scoring.js';
-import { DEFAULT_CONFIG } from '../js/data.js';
+import { DEFAULT_CONFIG, PLAYERS, ROTATION } from '../js/data.js';
 
-const cfg = structuredClone(DEFAULT_CONFIG);
-const BACK = [10, 11, 12, 13, 14, 15, 16, 17, 18];
+const IDS = PLAYERS.map((p) => p.id);
 const holes = (arr, start = 1) => Object.fromEntries(arr.map((v, i) => [start + i, v]));
+const nine = (v, start) => holes(Array(9).fill(v), start);
 
-test('builds 1 best ball + 2 singles per group, 6 matches per round', () => {
-  const matches = buildMatches(cfg);
-  assert.equal(matches.length, 3 * 6); // Tuesday's bracket has no matches until picks are in
-  const fri = matches.filter((m) => m.roundId === 'sat');
-  assert.deepEqual(fri.map((m) => m.type), ['bestball', 'singles', 'singles', 'bestball', 'singles', 'singles']);
-  assert.deepEqual(fri[1].sides.map((s) => s.players[0]), ['tate', 'sam']);
+// Teams as if drafted: captain first, then picks in order.
+const TEAMS = [
+  { name: 'Team Tate', color: '#2f7d4f', players: ['tate', 'sam', 'josh', 'jp'] },
+  { name: 'Team Garrett', color: '#1f5f99', players: ['garrett', 'jonah', 'brody', 'skyler'] },
+];
+const cfg = { ...structuredClone(DEFAULT_CONFIG), teams: TEAMS };
+const view = (scores = {}, c = cfg) => resolveConfig(c, scores);
+const matchesOf = (scores = {}, c = cfg) => buildMatches(view(scores, c));
+
+test('rotation: everyone partners each teammate once and plays 3 different opponents', () => {
+  const partners = {};
+  const opponents = {};
+  const add = (map, a, b) => { (map[a] ||= []).push(b); };
+  for (const day of ['sat', 'sun', 'mon']) {
+    for (const g of ROTATION[day]) {
+      add(partners, `a${g.a[0]}`, `a${g.a[1]}`); add(partners, `a${g.a[1]}`, `a${g.a[0]}`);
+      add(partners, `b${g.b[0]}`, `b${g.b[1]}`); add(partners, `b${g.b[1]}`, `b${g.b[0]}`);
+      [0, 1].forEach((i) => { add(opponents, `a${g.a[i]}`, g.b[i]); add(opponents, `b${g.b[i]}`, g.a[i]); });
+    }
+  }
+  for (const list of Object.values(partners)) assert.equal(new Set(list).size, 3);
+  for (const list of Object.values(opponents)) assert.equal(new Set(list).size, 3);
 });
 
-test('cross swaps singles opponents', () => {
-  const sat = buildMatches(cfg).filter((m) => m.roundId === 'sun' && m.type === 'singles');
-  assert.deepEqual(sat[0].sides.map((s) => s.players[0]), ['tate', 'brody']);
-  assert.deepEqual(sat[1].sides.map((s) => s.players[0]), ['garrett', 'josh']);
+test('before the draft every scoring round waits and there are no matches', () => {
+  const c = structuredClone(DEFAULT_CONFIG);
+  const v = resolveConfig(c, {});
+  assert.ok(v.rounds.filter((r) => r.format !== 'stroke').every((r) => r.pending && r.waitingOn === 'draft'));
+  assert.equal(buildMatches(v).length, 0);
 });
 
-test('disabled rounds produce no matches', () => {
-  const c = structuredClone(cfg);
-  c.rounds[0].enabled = false;
-  assert.equal(buildMatches(c).length, 2 * 6);
+test('after the draft: 6 matches a day Sat-Mon plus Quicksands; Tuesday waits', () => {
+  const matches = matchesOf();
+  assert.equal(matches.length, 3 * 6 + 1);
+  const sat = matches.filter((m) => m.roundId === 'sat');
+  assert.deepEqual(sat.map((m) => m.type), ['bestball', 'singles', 'singles', 'bestball', 'singles', 'singles']);
+  assert.deepEqual(sat[0].sides.map((s) => s.players), [['tate', 'sam'], ['garrett', 'jonah']]);
+  assert.deepEqual(sat[1].sides.map((s) => s.players[0]), ['tate', 'garrett']);
+  const qs = matches.find((m) => m.roundId === 'qs');
+  assert.equal(qs.type, 'teamstroke');
+  assert.equal(qs.holes.length, 14);
+  assert.equal(view().rounds.find((r) => r.id === 'tue').waitingOn, 'standings');
+  const total = cfg.rounds.reduce((a, r) => a + roundPoints(r), 0);
+  assert.equal(total, 32);
 });
 
 test('best ball takes the low score and ignores pickups', () => {
@@ -38,83 +65,50 @@ test('best ball takes the low score and ignores pickups', () => {
 });
 
 test('in-progress best ball status', () => {
-  const m = buildMatches(cfg)[0];
+  const m = matchesOf()[0]; // tate & sam v garrett & jonah
   const scores = {
-    tate: holes([4, 5, 4]), garrett: holes([5, 3, 5]),
-    sam: holes([5, 4, 4]), jonah: holes([4, 5, 6]),
+    tate: holes([4, 5, 4]), sam: holes([5, 3, 5]),
+    garrett: holes([5, 4, 4]), jonah: holes([4, 5, 6]),
   };
   const r = computeMatch(m, scores);
-  // H1: 4 v 4 halve, H2: 3 v 4 A wins, H3: 4 v 4 halve
   assert.equal(r.played, 3);
   assert.equal(r.diff, 1);
   assert.equal(r.status, '1 UP');
-  assert.equal(r.done, false);
   assert.equal(r.points, null);
   assert.deepEqual(r.projected, [1, 0]);
 });
 
-test('match closes out early (4&3) and ignores later holes', () => {
-  const m = buildMatches(cfg)[1]; // tate v sam, back 9
-  const scores = {
-    tate: holes([3, 3, 3, 3, 4, 4, 4, 9, 9], 10),
-    sam: holes([4, 4, 4, 4, 4, 4, 4, 3, 3], 10),
-  };
-  const r = computeMatch(m, scores);
-  // Tate wins 10-13, halves 14-15: 4 UP with 3 to play is closed out.
-  assert.equal(r.done, true);
-  assert.equal(r.leader, 0);
-  assert.deepEqual(r.points, [1, 0]);
+test('match closes out early, dormie and halved finals', () => {
+  const m = matchesOf()[1]; // tate v garrett, back 9
+  let r = computeMatch(m, { tate: holes([3, 3, 3, 3, 4, 4, 4, 9, 9], 10), garrett: holes([4, 4, 4, 4, 4, 4, 4, 3, 3], 10) });
   assert.equal(r.status, 'Won 4&3');
-  assert.equal(r.played, 6);
-});
-
-test('dormie and halved finals', () => {
-  const m = buildMatches(cfg)[1];
-  let r = computeMatch(m, { tate: holes([3, 5, 4, 4, 4, 4, 4], 10), sam: holes([4, 4, 4, 4, 4, 4, 4], 10) });
-  assert.equal(r.status, 'All square');
-  r = computeMatch(m, { tate: holes([3, 4, 4, 4, 4, 4, 4], 10), sam: holes([4, 4, 4, 4, 4, 4, 4], 10) });
-  assert.equal(r.status, '1 UP');
-  r = computeMatch(m, { tate: holes([3, 3, 4, 4, 4, 4, 4], 10), sam: holes([4, 4, 4, 4, 4, 4, 4], 10) });
+  assert.deepEqual(r.points, [1, 0]);
+  r = computeMatch(m, { tate: holes([3, 3, 4, 4, 4, 4, 4], 10), garrett: holes([4, 4, 4, 4, 4, 4, 4], 10) });
   assert.equal(r.status, '2 UP · Dormie');
-  r = computeMatch(m, { tate: holes(Array(9).fill(4), 10), sam: holes(Array(9).fill(4), 10) });
+  r = computeMatch(m, { tate: nine(4, 10), garrett: nine(4, 10) });
   assert.equal(r.status, 'Halved');
   assert.deepEqual(r.points, [0.5, 0.5]);
-});
-
-test('win on the last hole reads 1 UP', () => {
-  const m = buildMatches(cfg)[1];
-  const r = computeMatch(m, { tate: holes([...Array(8).fill(4), 3], 10), sam: holes(Array(9).fill(4), 10) });
+  r = computeMatch(m, { tate: holes([...Array(8).fill(4), 3], 10), garrett: nine(4, 10) });
   assert.equal(r.status, 'Won 1 UP');
 });
 
-test('standings add up: team gets best ball + singles points', () => {
-  const nine = (v, start) => holes(Array(9).fill(v), start);
-  const fri = {
-    tate: { ...nine(4, 1), ...nine(4, 10) },
-    garrett: { ...nine(5, 1), ...nine(5, 10) },
-    sam: { ...nine(5, 1), ...nine(4, 10) },
-    jonah: { ...nine(5, 1), ...nine(4, 10) },
+test('standings add up across a day', () => {
+  // Group 1: Tate & Sam win best ball; Tate halves Garrett; Sam loses to Jonah.
+  const sat = {
+    tate: { ...nine(4, 1), ...nine(4, 10) }, sam: { ...nine(5, 1), ...nine(5, 10) },
+    garrett: { ...nine(5, 1), ...nine(4, 10) }, jonah: { ...nine(5, 1), ...nine(4, 10) },
   };
-  const { teams, players } = computeStandings(cfg, { sat: fri });
-  // Team 1 wins best ball (4s v 5s), Tate halves Sam, Garrett loses to Jonah
+  const { teams, players } = computeStandings(view({ sat }), { sat });
   assert.equal(teams[0].points, 1.5);
   assert.equal(teams[1].points, 1.5);
   assert.equal(players.tate.points, 1.5);
-  assert.equal(players.garrett.points, 1);
   assert.equal(players.jonah.points, 1);
   assert.deepEqual([teams[0].w, teams[0].l, teams[0].h], [1, 1, 1]);
-  assert.equal(teams[2].points, 0);
 });
 
 test('course pars match the scorecard totals', () => {
   const total = (id) => Object.values(cfg.pars[id]).reduce((a, b) => a + b, 0);
-  assert.deepEqual(['sat', 'sun', 'mon', 'tue'].map(total), [72, 71, 72, 71]);
-});
-
-test('default config has no Friday round and Tuesday is a bracket', () => {
-  assert.equal(cfg.rounds.some((r) => r.id === 'fri'), false);
-  assert.equal(cfg.rounds.find((r) => r.id === 'tue').format, 'bracket');
-  assert.equal(buildMatches(cfg).length, 3 * 6);
+  assert.deepEqual(['fri', 'sat', 'sun', 'qs', 'mon', 'tue'].map(total), [71, 72, 71, 42, 72, 71]);
 });
 
 test('score marks relative to par', () => {
@@ -123,220 +117,256 @@ test('score marks relative to par', () => {
   assert.equal(scoreMark(3, 4), 'birdie');
   assert.equal(scoreMark(4, 4), 'par');
   assert.equal(scoreMark(5, 4), 'bogey');
-  assert.equal(scoreMark(6, 4), 'double');
   assert.equal(scoreMark(9, 4), 'double');
   assert.equal(scoreMark(null, 4), '');
 });
 
-test('birdie counts use each round\'s pars and skip disabled rounds', () => {
+test('birdie counts use each round\'s pars, including Friday, and skip disabled rounds', () => {
   const c = structuredClone(cfg);
-  // Circling Raven: 1 par 5, 2 par 4, 12 par 5, 13 par 3. Scarecrow 1 is a par 4.
   const scores = {
+    fri: { tate: { 4: 2 } }, // Indian Canyon 4 is a par 3
     sat: { tate: { 12: 4, 13: 2, 1: 4, 2: 5 }, sam: { 12: 3 } },
     sun: { tate: { 1: 3 } },
   };
-  let counts = birdieCounts(c, scores);
-  assert.equal(counts.tate.birdies, 4);
-  assert.equal(counts.sam.birdies, 1); // eagle counts as a birdie
+  let counts = birdieCounts(c, scores, IDS);
+  assert.equal(counts.tate.birdies, 5);
+  assert.equal(counts.sam.birdies, 1);
   c.rounds.find((r) => r.id === 'sun').enabled = false;
-  counts = birdieCounts(c, scores);
-  assert.equal(counts.tate.birdies, 3);
+  counts = birdieCounts(c, scores, IDS);
+  assert.equal(counts.tate.birdies, 4);
 });
 
-// Every player shoots the same score on every hole of each nine.
-const round = (perPlayer) => Object.fromEntries(Object.entries(perPlayer).map(([p, [front, back]]) => (
-  [p, { ...holes(Array(9).fill(front), 1), ...holes(Array(9).fill(back), 10) }])));
-const teamScores = (byTeam) => {
+test('Quicksands team stroke play: live on score to par, 2 points, a tie is 1 each', () => {
+  const m = matchesOf().find((x) => x.roundId === 'qs');
+  const fourteen = (v) => holes(Array(14).fill(v));
+  const scores = {};
+  TEAMS[0].players.forEach((p) => { scores[p] = fourteen(3); });
+  TEAMS[1].players.forEach((p) => { scores[p] = fourteen(3); });
+  scores.skyler = fourteen(4); // +14 for Team Garrett
+  let r = computeMatch(m, scores);
+  assert.equal(r.done, true);
+  assert.deepEqual(r.points, [2, 0]);
+  assert.equal(r.status, 'Won by 14');
+  // Live: Team Tate's group is through 2 at +2, Team Garrett's through 7 at even.
+  const live = {
+    tate: holes([4, 4]), sam: holes([3, 3]), josh: holes([3, 3]), jp: holes([3, 3]),
+    garrett: holes(Array(7).fill(3)), jonah: holes(Array(7).fill(3)), brody: holes(Array(7).fill(3)), skyler: holes(Array(7).fill(3)),
+  };
+  r = computeMatch(m, live);
+  assert.equal(r.leader, 1);
+  assert.equal(r.up, 2);
+  assert.equal(r.played, 2);
+  assert.deepEqual(r.projected, [0, 2]);
+  scores.skyler = fourteen(3);
+  r = computeMatch(m, scores);
+  assert.deepEqual(r.points, [1, 1]);
+});
+
+test('Captain Round: low two are captains; back 9, then a putt-off, breaks ties', () => {
+  const eighteen = (front, back) => ({ ...nine(front, 1), ...nine(back, 10) });
+  const scores = {
+    fri: {
+      tate: eighteen(4, 4), // 72
+      garrett: eighteen(5, 3), // 72, better back 9
+      sam: eighteen(4, 5), jonah: eighteen(5, 5), josh: eighteen(5, 5), brody: eighteen(6, 5),
+    },
+  };
+  let cr = captainRound(cfg, scores);
+  assert.equal(cr.allDone, true);
+  assert.deepEqual(cr.captains, ['garrett', 'tate']);
+  assert.equal(cr.rows[0].tiebreak, 'Back 9');
+
+  // Live: not everyone is done, so no captains yet; sorted by score to par.
+  delete scores.fri.brody[18];
+  cr = captainRound(cfg, scores);
+  assert.equal(cr.captains, null);
+  scores.fri.brody[18] = 5;
+
+  // Dead even (total and back 9) for 2nd: putt-off.
+  scores.fri.tate = eighteen(5, 3);
+  cr = captainRound(cfg, scores);
+  assert.equal(cr.captains, null);
+  assert.deepEqual(cr.puttoff.players.sort(), ['garrett', 'tate']);
+  const c = { ...cfg, puttoffs: { captain: { [cr.puttoff.key]: ['tate'] } } };
+  cr = captainRound(c, scores);
+  assert.deepEqual(cr.captains, ['tate', 'garrett']);
+
+  // A tie further down the board doesn't need a putt-off.
+  scores.fri.tate = eighteen(4, 4);
+  scores.fri.brody = eighteen(5, 5);
+  cr = captainRound(cfg, scores);
+  assert.deepEqual(cr.captains, ['garrett', 'tate']);
+  assert.equal(cr.puttoff, null);
+});
+
+test('draft: low score picks first, then alternate; everyone ends up on a team', () => {
+  const c = { ...structuredClone(DEFAULT_CONFIG), draft: { captains: ['sam', 'jp'], picks: ['tate', 'skyler', 'josh'] } };
+  let d = draftState(c, {}, IDS);
+  assert.equal(d.stage, 'drafting');
+  assert.equal(d.manual, true);
+  assert.deepEqual(d.rosters, [['sam', 'tate', 'josh'], ['jp', 'skyler']]);
+  assert.equal(d.turn, 1);
+  assert.deepEqual(d.pool.sort(), ['brody', 'garrett', 'jonah']);
+  c.draft.picks.push('garrett', 'jonah', 'brody');
+  d = draftState(c, {}, IDS);
+  assert.equal(d.stage, 'done');
+  assert.deepEqual(d.rosters, [['sam', 'tate', 'josh', 'jonah'], ['jp', 'skyler', 'garrett', 'brody']]);
+  // No captains yet without Friday scores or a manual pick.
+  assert.equal(draftState(structuredClone(DEFAULT_CONFIG), {}, IDS).stage, 'captains');
+});
+
+// Every player on a team shoots the same score on every hole.
+const teamRound = (a, b, n = 18) => {
   const out = {};
-  cfg.teams.forEach((t, i) => t.players.forEach((p) => { out[p] = [byTeam[i], byTeam[i]]; }));
-  return round(out);
+  TEAMS[0].players.forEach((p) => { out[p] = holes(Array(n).fill(a)); });
+  TEAMS[1].players.forEach((p) => { out[p] = holes(Array(n).fill(b)); });
+  return out;
 };
 
-test('Tuesday waits for Sat-Mon, then for A/B picks from the 4th seed up', () => {
-  // Team 4 best, then 3, 2, 1: seeds are Team 4, Team 3, Team 2, Team 1.
-  const scores = { sat: teamScores([6, 5, 4, 3]), sun: teamScores([6, 5, 4, 3]), mon: teamScores([6, 5, 4, 3]) };
-  const back = BACK.map((h) => [h, scores.mon.tate[h]]);
-  for (const h of BACK) delete scores.mon.tate[h];
-  let tue = resolveConfig(cfg, scores).rounds.find((r) => r.id === 'tue');
+test('Tuesday: waits for every earlier match, then the leader sets the matchups; 12 points', () => {
+  const scores = { sat: teamRound(4, 5), sun: teamRound(4, 5), qs: teamRound(3, 3, 14), mon: teamRound(4, 5) };
+  delete scores.qs.jp[14];
+  let tue = view(scores).rounds.find((r) => r.id === 'tue');
   assert.equal(tue.pending, true);
-  assert.equal(tue.needsPicks, undefined);
+  assert.equal(tue.waitingOn, 'standings');
+  assert.equal(tue.leaderNow, 0);
 
-  for (const [h, v] of back) scores.mon.tate[h] = v;
-  tue = resolveConfig(cfg, scores).rounds.find((r) => r.id === 'tue');
-  assert.deepEqual(tue.seeds, [3, 2, 1, 0]);
+  scores.qs.jp[14] = 3;
+  tue = view(scores).rounds.find((r) => r.id === 'tue');
+  assert.equal(tue.leader, 0);
   assert.equal(tue.needsPicks, true);
-  assert.equal(tue.pickTurn, 0); // 4th seed (Team 1) picks first
 
-  const c = { ...cfg, bracketPicks: { 0: 'tate' } };
-  assert.equal(resolveConfig(c, scores).rounds.find((r) => r.id === 'tue').pickTurn, 1);
+  const c = { ...cfg, tuePicks: { pairs: [['tate', 'skyler'], ['sam', 'brody'], ['josh', 'garrett'], ['jp', 'jonah']] } };
+  tue = view(scores, c).rounds.find((r) => r.id === 'tue');
+  assert.equal(tue.pending, undefined);
+  assert.deepEqual(tue.groups[0], { a: ['tate', 'sam'], b: ['skyler', 'brody'] });
+
+  // Team Tate wins everything on the front, Team Garrett everything on the back.
+  scores.tue = {};
+  TEAMS[0].players.forEach((p) => { scores.tue[p] = { ...nine(3, 1), ...nine(5, 10) }; });
+  TEAMS[1].players.forEach((p) => { scores.tue[p] = { ...nine(5, 1), ...nine(3, 10) }; });
+  const tueMatches = buildMatches(view(scores, c)).filter((m) => m.roundId === 'tue');
+  assert.equal(tueMatches.length, 8);
+  const back = tueMatches.find((m) => m.id === 'tue-g1-b1');
+  assert.deepEqual(back.sides.map((s) => s.players[0]), ['tate', 'brody']); // opponents swap
+  const pts = [0, 0];
+  tueMatches.forEach((m) => computeMatch(m, scores.tue).points.forEach((p, si) => { pts[m.sides[si].team] += p; }));
+  assert.deepEqual(pts, [4, 8]);
 });
 
-test('head-to-head breaks a points tie', () => {
-  const scores = {
-    // Sat: Team 1 sweeps Team 2; Teams 3 and 4 halve everything.
-    sat: round({ tate: [3, 3], garrett: [3, 3], sam: [5, 5], jonah: [5, 5], josh: [4, 4], brody: [4, 4], jp: [4, 4], skyler: [4, 4] }),
-    // Sun: Team 3 sweeps Team 1; Team 2 sweeps Team 4.
-    sun: round({ tate: [5, 5], garrett: [5, 5], josh: [3, 3], brody: [3, 3], sam: [3, 3], jonah: [3, 3], jp: [5, 5], skyler: [5, 5] }),
-  };
-  const { ranked, ties } = rankTeams(cfg, scores, ['sat', 'sun']);
-  assert.deepEqual(ranked.map((t) => [t.idx, t.points]), [[2, 4.5], [0, 3], [1, 3], [3, 1.5]]);
-  assert.equal(ranked[1].tiebreak, 'Head-to-head points');
-  assert.equal(ranked[1].rank, 2);
-  assert.equal(ranked[2].rank, 3);
-  // One tie (Teams 1 and 2 on 3 pts), settled at the first step.
-  assert.equal(ties.length, 1);
-  assert.deepEqual(ties[0].teams.sort(), [0, 1]);
-  assert.deepEqual(ties[0].steps.map((s) => [s.key, s.values[0], s.values[1]]), [['h2h', 3, 0]]);
-  assert.deepEqual(ties[0].steps[0].outcome, [[0], [1]]);
+test('Tuesday: level after every tiebreaker needs a putt-off to pick the leader', () => {
+  const even = { sat: teamRound(4, 4), sun: teamRound(4, 4), qs: teamRound(3, 3, 14), mon: teamRound(4, 4) };
+  let tue = view(even).rounds.find((r) => r.id === 'tue');
+  assert.equal(tue.needsPuttoff, true);
+  const c = { ...cfg, puttoffs: { seed: { '0-1': [1] } } };
+  tue = view(even, c).rounds.find((r) => r.id === 'tue');
+  assert.equal(tue.leader, 1);
+  assert.equal(tue.needsPicks, true);
 });
 
-test('holes-up margin breaks a tie when head-to-head and wins are level', () => {
-  // Sat only: Team 1 beats Team 2 2-1, Team 3 beats Team 4 2-1, but Team 3 by more.
-  const scores = {
-    sat: round({
-      // Team 1: best ball won 1 UP, Tate wins 5&4, Garrett loses 5&4 -> margin +1.
-      tate: [3, 3], garrett: [4, 5], sam: [4, 4], jonah: [4, 4],
-      // Team 3: best ball won 5&4, Josh wins 5&4, Brody loses 5&4 -> margin +5.
-      josh: [3, 3], brody: [5, 5], jp: [5, 5], skyler: [4, 4],
-    }),
+test('tiebreakers: most wins, then holes-up margin (no head-to-head with two teams)', () => {
+  const last3 = (v) => holes([...Array(8).fill(4), v], 10);
+  const sat = {
+    // G1: Tate & Sam win best ball 5&4, Tate beats Garrett 5&4, Jonah beats Sam 5&4.
+    tate: { ...nine(3, 1), ...nine(3, 10) }, sam: { ...nine(3, 1), ...nine(5, 10) },
+    garrett: { ...nine(4, 1), ...nine(4, 10) }, jonah: { ...nine(4, 1), ...nine(4, 10) },
+    // G2: Brody & Skyler win best ball 1 UP, Josh beats Brody 1 UP, Skyler beats JP 1 UP.
+    josh: { ...nine(4, 1), ...last3(3) }, jp: { ...nine(4, 1), ...nine(4, 10) },
+    brody: { ...holes([...Array(8).fill(4), 3], 1), ...nine(4, 10) }, skyler: { ...nine(4, 1), ...last3(3) },
   };
-  Object.assign(scores.sat.tate, holes([4, 4, 4, 4, 4, 4, 4, 4, 3], 1));
-  const { ranked, ties } = rankTeams(cfg, scores, ['sat']);
-  assert.deepEqual(ties[0].steps.map((s) => s.key), ['h2h', 'wins', 'margin']);
-  assert.deepEqual(ranked.slice(0, 2).map((t) => [t.idx, t.points, t.wins]), [[2, 2, 2], [0, 2, 2]]);
+  const { ranked, ties } = rankTeams(view({ sat }), { sat }, ['sat']);
+  assert.deepEqual(ranked.map((t) => [t.idx, t.points, t.wins, t.margin]), [[0, 3, 3, 4], [1, 3, 3, -4]]);
+  assert.deepEqual(ties[0].steps.map((st) => st.key), ['wins', 'margin']);
   assert.equal(ranked[0].tiebreak, 'Holes-up margin');
 });
 
 test('dead even after every tiebreaker goes to a putt-off', () => {
-  const scores = { sat: teamScores([4, 4, 4, 4]) };
-  let { ranked, ties } = rankTeams(cfg, scores, ['sat']);
+  const sat = teamRound(4, 4);
+  let { ranked, ties } = rankTeams(view({ sat }), { sat }, ['sat']);
   assert.ok(ranked.every((t) => t.unresolved && t.rank === 1));
-  assert.deepEqual(ties[0].pending[0].teams.sort(), [0, 1, 2, 3]);
-  assert.equal(ties[0].steps.some((s) => s.key === 'puttoff'), false);
-
-  // Team 3 wins the putt-off; the other three are still tied.
-  const c = { ...cfg, puttoffs: { final: { '0-1-2-3': [2] } } };
-  ({ ranked, ties } = rankTeams(c, scores, ['sat']));
-  assert.equal(ranked[0].idx, 2);
-  assert.equal(ranked[0].unresolved, false);
-  assert.ok(ranked.slice(1).every((t) => t.unresolved && t.rank === 2));
-  assert.deepEqual(ties[0].pending[0].done, [2]);
-
-  // Full putt-off order recorded: everyone is placed.
-  c.puttoffs.final['0-1-2-3'] = [2, 0, 3, 1];
-  ({ ranked } = rankTeams(c, scores, ['sat']));
-  assert.deepEqual(ranked.map((t) => [t.idx, t.rank, t.unresolved]), [[2, 1, false], [0, 2, false], [3, 3, false], [1, 4, false]]);
+  assert.deepEqual(ties[0].pending[0].teams.sort(), [0, 1]);
+  const c = { ...cfg, puttoffs: { final: { '0-1': [1] } } };
+  ({ ranked } = rankTeams(view({ sat }, c), { sat }, ['sat']));
+  assert.deepEqual(ranked.map((t) => [t.idx, t.rank, t.unresolved]), [[1, 1, false], [0, 2, false]]);
 });
 
-test('any seed tie left for a putt-off holds up the bracket', () => {
-  const even = { sat: teamScores([4, 4, 4, 4]), sun: teamScores([4, 4, 4, 4]), mon: teamScores([4, 4, 4, 4]) };
-  let tue = resolveConfig(cfg, even).rounds.find((r) => r.id === 'tue');
-  assert.equal(tue.needsPuttoff, true);
-  // Putt-off only splits the top two: still waiting on 3rd/4th.
-  let c = { ...cfg, puttoffs: { seed: { '0-1-2-3': [3, 2] } } };
-  tue = resolveConfig(c, even).rounds.find((r) => r.id === 'tue');
-  assert.equal(tue.needsPuttoff, true);
-  c = { ...cfg, puttoffs: { seed: { '0-1-2-3': [3, 2, 1] } } };
-  tue = resolveConfig(c, even).rounds.find((r) => r.id === 'tue');
-  assert.equal(tue.needsPuttoff, undefined);
-  assert.deepEqual(tue.seeds, [3, 2, 1, 0]);
-  assert.equal(tue.needsPicks, true);
-});
-
-test('Bracket Day: semis 1v4 and 2v3, finals from the semis, 10 points in all', () => {
-  // Seeds: 1 Team 4 (jp, skyler), 2 Team 3 (josh, brody), 3 Team 2 (sam, jonah), 4 Team 1 (tate, garrett).
-  const prior = { sat: teamScores([6, 5, 4, 3]), sun: teamScores([6, 5, 4, 3]), mon: teamScores([6, 5, 4, 3]) };
-  const c = { ...cfg, bracketPicks: { 3: 'jp', 2: 'josh', 1: 'sam', 0: 'tate' } };
-  const tue = {
-    // Front 9 semis. A: JP beats Tate, Josh halves Sam. B: Skyler beats Garrett, Brody beats Jonah.
-    jp: holes(Array(9).fill(3)), tate: holes(Array(9).fill(5)),
-    josh: holes(Array(9).fill(4)), sam: holes(Array(9).fill(4)),
-    skyler: holes(Array(9).fill(3)), garrett: holes(Array(9).fill(5)),
-    brody: holes(Array(9).fill(3)), jonah: holes(Array(9).fill(5)),
+test('skins: par 3s (every hole at Quicksands), outright low only, $5 from each of the other 7', () => {
+  const c = cfg;
+  const scores = {
+    // Circling Raven par 3s: 3, 7, 13, 16. Hole 1 is a par 5 (no skin).
+    sat: {},
+    qs: {},
   };
-  let resolved = resolveConfig(c, { ...prior, tue });
-  let round = resolved.rounds.find((r) => r.id === 'tue');
-  const [A, B] = round.groups;
-  assert.deepEqual(A.players, ['jp', 'josh', 'sam', 'tate']);
-  assert.deepEqual(B.players, ['skyler', 'brody', 'jonah', 'garrett']);
-  // Josh (seed 2) advances from the halved semi.
-  assert.deepEqual(A.final, [0, 1]);
-  assert.deepEqual(A.third, [2, 3]);
-  assert.deepEqual(B.final, [0, 1]);
-
-  // Back 9: A final JP v Josh halved; A 3rd Tate beats Sam; B final Brody beats Skyler; B 3rd Garrett beats Jonah.
-  const back9 = (v) => holes(Array(9).fill(v), 10);
-  Object.assign(tue.jp, back9(4)); Object.assign(tue.josh, back9(4));
-  Object.assign(tue.tate, back9(3)); Object.assign(tue.sam, back9(5));
-  Object.assign(tue.brody, back9(3)); Object.assign(tue.skyler, back9(5));
-  Object.assign(tue.garrett, back9(3)); Object.assign(tue.jonah, back9(5));
-  resolved = resolveConfig(c, { ...prior, tue });
-  const matches = buildMatches(resolved).filter((m) => m.roundId === 'tue');
-  assert.equal(matches.length, 8);
-  const pts = {};
-  let total = 0;
-  for (const m of matches) {
-    const res = computeMatch(m, tue);
-    assert.ok(res.done, m.id);
-    m.sides.forEach((sd, si) => { pts[sd.players[0]] = (pts[sd.players[0]] || 0) + res.points[si]; total += res.points[si]; });
-  }
-  assert.equal(total, 10);
-  assert.equal(pts.jp, 1 + 1); // semi win + halved final
-  assert.equal(pts.josh, 0.5 + 1); // halved semi + halved final
-  assert.equal(pts.brody, 1 + 2); // semi win + final win
-  assert.equal(pts.tate, 0 + 1); // 3rd place win
+  IDS.forEach((p) => { scores.sat[p] = { 1: 4, 3: 3, 7: 3, 13: 3 }; scores.qs[p] = { 1: 3 }; });
+  scores.sat.tate[3] = 2; // outright: skin
+  scores.sat.sam[7] = 2; scores.sat.jp[7] = 2; // tie for low: no skin
+  delete scores.sat.skyler[13]; // not everyone in yet
+  scores.qs.josh[1] = 2; // Quicksands skin
+  scores.sat.garrett[1] = 3; // par 5, no skin
+  const { holes: rows, net } = computeSkins(c, scores, IDS);
+  const row = (rid, h) => rows.find((r) => r.roundId === rid && r.hole === h);
+  assert.equal(row('sat', 1), undefined);
+  assert.equal(row('sat', 3).winner, 'tate');
+  assert.deepEqual(row('sat', 7).tied.sort(), ['jp', 'sam']);
+  assert.deepEqual(row('sat', 13).waiting, ['skyler']);
+  assert.equal(row('qs', 1).winner, 'josh');
+  assert.equal(rows.filter((r) => r.roundId === 'qs').length, 14);
+  assert.equal(net.tate, 35 - 5);
+  assert.equal(net.josh, 35 - 5);
+  assert.equal(net.sam, -10);
+  assert.equal(Object.values(net).reduce((a, b) => a + b, 0), 0);
+  const pay = settleUp(net);
+  const after = { ...net };
+  pay.forEach(({ from, to, amount }) => { after[from] += amount; after[to] -= amount; });
+  assert.ok(Object.values(after).every((v) => v === 0));
+  assert.ok(pay.length <= 7);
 });
 
 test('match streak counts holes won in a row from the latest hole', () => {
-  const m = buildMatches(cfg).find((x) => x.id === 'sat-g1-s1'); // Tate v Sam, back 9
-  // 10 Tate, 11 halve, 12 Sam, 13 Sam
-  let r = computeMatch(m, { tate: holes([3, 4, 5, 5], 10), sam: holes([4, 4, 4, 4], 10) });
+  const m = matchesOf().find((x) => x.id === 'sat-g1-s1'); // Tate v Garrett, back 9
+  let r = computeMatch(m, { tate: holes([3, 4, 5, 5], 10), garrett: holes([4, 4, 4, 4], 10) });
   assert.deepEqual(matchStreak(r), { side: 1, n: 2 });
-  r = computeMatch(m, { tate: holes([3, 4], 10), sam: holes([4, 4], 10) }); // ends on a halve
+  r = computeMatch(m, { tate: holes([3, 4], 10), garrett: holes([4, 4], 10) });
   assert.equal(matchStreak(r), null);
-  r = computeMatch(m, { tate: holes([3, 3, 3, 4], 10), sam: holes([4, 4, 4, 4], 10) });
+  r = computeMatch(m, { tate: holes([3, 3, 3, 4], 10), garrett: holes([4, 4, 4, 4], 10) });
   assert.deepEqual(longestMatchRun(r), { side: 0, n: 3 });
 });
 
 test('birdie streak needs consecutive holes ending at the latest one', () => {
   // Circling Raven pars: 1=5, 2=4, 3=3, 4=4
   assert.equal(birdieStreak(cfg, 'sat', { 1: 4, 2: 3 }), 2);
-  assert.equal(birdieStreak(cfg, 'sat', { 1: 4, 2: 3, 3: 3 }), 0); // par on 3 ends it
-  assert.equal(birdieStreak(cfg, 'sat', { 1: 4, 3: 2 }), 1); // hole 2 missing
+  assert.equal(birdieStreak(cfg, 'sat', { 1: 4, 2: 3, 3: 3 }), 0);
+  assert.equal(birdieStreak(cfg, 'sat', { 1: 4, 3: 2 }), 1);
   assert.equal(longestBirdieRun(cfg, { sat: { tate: { 1: 4, 2: 3, 3: 2, 4: 4 } } }, 'tate'), 3);
 });
 
-test('highlights: birdies, eagles, birdie runs, 3-hole runs and match results', () => {
-  const nine = (v, start) => holes(Array(9).fill(v), start);
+test('highlights: birdies, eagles, birdie runs, 3-hole runs, match results and Quicksands', () => {
   const scores = { sat: {
-    // Tate: birdie on 1 and 2 (pars 5, 4), eagle on 5 (par 5)
     tate: { ...holes([4, 3, 3, 4, 3, 4, 3, 4, 4], 1), ...nine(3, 10) },
-    garrett: { ...nine(5, 1), ...nine(5, 10) },
-    sam: { ...nine(5, 1), ...nine(4, 10) },
+    sam: { ...nine(5, 1), ...nine(5, 10) },
+    garrett: { ...nine(5, 1), ...nine(4, 10) },
     jonah: { ...nine(5, 1), ...nine(4, 10) },
-  } };
+  }, qs: teamRound(3, 4, 14) };
   const times = { sat: { tate: { 1: 1000, 2: 2000, 5: 5000 } } };
-  const hl = highlights(cfg, scores, times);
+  const hl = highlights(view(scores), scores, times, IDS);
   const ids = hl.map((h) => h.id);
   assert.ok(ids.includes('hl-sat-tate-1-birdie'));
-  assert.ok(ids.includes('hl-sat-tate-1-run')); // birdies on 1-2, keyed by the first hole
   assert.equal(hl.find((h) => h.id === 'hl-sat-tate-1-run').n, 2);
   assert.ok(ids.includes('hl-sat-tate-5-eagle'));
   assert.ok(ids.includes('hl-sat-g1-bb-final'));
-  // Tate wins every back-nine hole: one growing item, not one per hole.
+  assert.ok(ids.includes('hl-qs-team-final'));
   const runs = hl.filter((h) => h.type === 'holeRun' && h.match.id === 'sat-g1-s1');
   assert.equal(runs.length, 1);
-  assert.equal(runs[0].n, 5); // closed out 5&4 after 5 holes
-  assert.equal(hl[0].id, 'hl-sat-tate-5-eagle'); // newest first
+  assert.equal(runs[0].n, 5);
+  assert.equal(hl[0].id, 'hl-sat-tate-5-eagle');
 });
 
 test('a hole in one is its own highlight and counts as a birdie', () => {
-  // Circling Raven #3 is a par 3; Scarecrow #18 is a drivable par 4.
-  const scores = { sat: { tate: { 3: 1 } }, sun: { sam: { 18: 1 } } };
-  const ids = highlights(cfg, scores, {}).map((h) => h.id);
+  const scores = { sat: { tate: { 3: 1 } }, fri: { sam: { 4: 1 } } };
+  const ids = highlights(view(scores), scores, {}, IDS).map((h) => h.id);
   assert.ok(ids.includes('hl-sat-tate-3-ace'));
-  assert.ok(ids.includes('hl-sun-sam-18-ace'));
-  const counts = birdieCounts(cfg, scores);
+  assert.ok(ids.includes('hl-fri-sam-4-ace'));
+  const counts = birdieCounts(cfg, scores, IDS);
   assert.equal(counts.tate.birdies, 1);
   assert.equal(counts.sam.birdies, 1);
 });

@@ -1,63 +1,73 @@
 # ⛳ Washington / Idaho Golf Trip — Oct 2–6, 2026
 
-A mobile web app for the trip's match play tournament: 8 players, 4 teams of two.
+A mobile web app for the trip's tournament: 8 players, two teams of 4 picked in a draft.
 
 ## Format
 
-Every round:
-
-| Holes | Format | Points |
-|---|---|---|
-| Front 9 | **Best ball** match play, team vs team (each player enters their own score, low score on the team counts) | 1 per match |
-| Back 9 | **Singles** match play, 1 v 1 within the same group | 1 per match |
-
-Win = 1, tie = ½, loss = 0. Each team has 3 points up for grabs per day Sat–Mon.
-Tournament rounds are Sat–Tue; Friday's round is just for fun and isn't tracked.
-Sat–Mon groups rotate so every team plays every other team once.
-
-### Tuesday: Bracket Day
-
-All singles. Once every Sat–Mon match is final, teams are seeded 1–4 and each
-team puts one player in **Bracket A** (9:20 group) and the other in **Bracket B**
-(9:30 group), picked on the Leaderboard in order: 4th seed first, 1st seed last.
-
-| | Matches (each bracket) | Win | Tie |
+| Day | Course | Format | Points |
 |---|---|---|---|
-| Front 9: Semifinals | 1 v 4, 2 v 3 | 1 | ½ each, higher seed advances |
-| Back 9: Final | semi winners | 2 | 1 each |
-| Back 9: 3rd place | semi losers | 1 | ½ each |
+| Fri | Indian Canyon | **Captain Round**: stroke play (6 players), then the draft | – |
+| Sat | Circling Raven | Best ball front 9, singles back 9 | 6 |
+| Sun | Scarecrow | Best ball front 9, singles back 9 | 6 |
+| Mon AM | Quicksands (14 par 3s) | **Team stroke play**: all 4 scores count | 2 |
+| Mon PM | Gamble Sands | Best ball front 9, singles back 9 | 6 |
+| Tue | Coeur d'Alene | **Escalating singles**: front 9 worth 1, back 9 worth 2 | 12 |
 
-That's 10 points on Tuesday (up to 6 for one team), 15 max per team over the trip.
-Tate can reset the picks in Setup.
+32 points in all; 16½ wins the Cup (a 16–16 tie goes to the tiebreakers, no shared Cup).
+Win = 1, tie = ½, loss = 0 (Quicksands: 2 to the lower team total, 1 each for a tie;
+Tuesday's back 9: 2 per match, 1 each for a tie). Triple bogey max, no handicaps.
+
+### Friday: Captain Round and the draft
+
+Straight stroke play. The two low scores are the captains (tie: lower back 9, then a
+putt-off recorded in the app). When the last score goes in, every phone gets a captain
+reveal. Then the captains draft on the Leaderboard: low score picks first, then they
+alternate (A, B, A, B, A, B). Skyler and JP are in the pool. Every pick pops up on every
+phone. After the last pick, each captain names their team and picks a color. Tate can
+set captains by hand, undo a pick or reset the draft in Setup.
+
+### Sat–Mon: match play
+
+Two groups of 4, two players from each team in each group: best ball 2 v 2 on the front,
+two singles on the back. The rotation (by draft order) has everyone partner each teammate
+once and play three different singles opponents. Quicksands and Gamble Sands use the same
+groups.
+
+### Tuesday: escalating singles
+
+Once every match through Monday is final, the captain of the team in first sets all four
+matchups on the Leaderboard (who plays who, and who shares a group). Front 9 singles are
+worth 1; opponents swap within each group for the back 9, worth 2. 12 points.
 
 ### Tiebreakers
 
-Used for Tuesday's seeds and for the final standings when teams are level on points:
+Used to decide who picks Tuesday and who wins the Cup when the teams are level:
 
-1. Head-to-head points (only matches between the tied teams)
-2. Most matches won
-3. Holes-up margin (Won 3&2 = +3, lost 1 UP = −1, summed over every match)
-4. Fewest total strokes (both players, all counted rounds)
-5. Putt-off: the tied teams settle it on the putting green and someone taps the winner in the app
+1. Most matches won
+2. Holes-up margin (Won 3&2 = +3, lost 1 UP = −1, summed over every match play match)
+3. Fewest total strokes (every player, all counted rounds)
+4. Putt-off: settle it on the putting green and tap the winner in the app
 
-When there's a tie after Monday or after Tuesday, the Leaderboard shows a
-Tiebreaker card that walks down this list step by step (each team's numbers
-and who won each step) until the tie is broken. It only asks for a putt-off if
-the result matters: splitting 2nd/3rd for Tuesday's matchups, or 1st for the title.
+### Skins
+
+Every par 3 at Circling Raven, Scarecrow, Gamble Sands and Coeur d'Alene, plus every hole
+at Quicksands (32 in all). All 8 players on the same hole. Once everyone's in, the
+outright low score wins $5 from each of the other 7; any tie and nobody wins it; nothing
+carries. The Leaderboard shows everyone's net and a settle-up list; wins post to the Feed.
 
 ## Tabs
 
-- **Leaderboard**: a "Your match" card at the top (your live match in broadcast style with an Enter scores button on round days, otherwise a countdown to your next tee time and opponent), team standings as a Cup scoreboard with **Format** and **Tiebreakers** dropdowns that explain the rules (with a step-by-step tiebreaker card when teams are tied after Monday or Tuesday, and the winning team highlighted with a champion banner once Tuesday is final), live status of every match in a TV-broadcast style (leading side lit up in its team color, "2 UP · thru 6" / "A/S" / "2&1 Final" in the middle, and a hole-by-hole strip colored by who won each hole), and the Birdie Board: a podium for the top 3 (ties share a medal), bars for the rest, and a "still hunting" line for anyone without one yet (eagles count as birdies).
-- **Scores**: pick the round, your group and the hole, then tap each player's score: one button per score from an ace (on par 3s and 4s) or eagle up to triple bogey (the max), labeled Birdie / Par / Bogey and so on. Tap the selected score again to clear it. Once all four are in, it moves to the next hole. Flip the toggle at the top to **Scorecards**: a full 18-hole scorecard for each course, marked like a paper card (circle = birdie, double circle = eagle or better, square = bogey, double square = double bogey or worse), plus a card for each match with the best ball scores that counted highlighted.
+- **Leaderboard**: a "Your match" card at the top (your round today with an Enter scores button, otherwise a countdown to Circling Raven or your next tee time), then Friday's Captain Round board and the live draft, or Tuesday's matchup picker. Below: the Cup scoreboard with **Format** and **Tiebreakers** dropdowns (and a step-by-step tiebreaker card when the teams are level after Monday or at the end), every match in a TV-broadcast style, Skins (net $ and settle-up) and the Birdie Board (eagles count as birdies).
+- **Scores**: pick the round, your group and the hole, then tap each player's score: one button per score from an ace (on par 3s and 4s) or eagle up to triple bogey (the max), labeled Birdie / Par / Bogey and so on. Tap the selected score again to clear it. Once everyone in the group is in, it moves to the next hole. Skin holes are tagged 💰. Flip the toggle at the top to **Scorecards**: a full 18-hole scorecard for each course, marked like a paper card (circle = birdie, double circle = eagle or better, square = bogey, double square = double bogey or worse), plus a card for each match with the best ball scores that counted highlighted.
 - **Feed**: the Clubhouse. Post text, photos and videos (tagged to a hole if you like), react with 🔥 😂 💀 ⛳ 👏 and comment. Birdies, eagles, birdie streaks, 3+ holes won in a row and match results post themselves automatically.
 - **Trip**: the itinerary, tee times, where we're staying and flights.
-- **Setup** (only on the organizer's phone, see below): set team names, swap players between teams (tap one, then another), pick each day's matchups and singles pairings, and choose which days count. Every change saves for everyone instantly.
+- **Setup** (only on the organizer's phone, see below): captains by hand, undo/reset the draft, team names and colors, swap players (tap one, then another), Friday groups, singles swaps, reset Tuesday's matchups, and which rounds count. Every change saves for everyone instantly.
 
 Streaks: 🔥 next to a side that has won 2+ holes in a row in its match (🥶 for the other side), and 🐦🔥 next to a player with 2+ birdies in a row.
 
 **Hole in one**: enter a 1 on any par 3 or par 4 and every phone gets a gold "HOLE IN ONE!" banner, plus a highlight in the Feed. It counts on the Birdie Board too.
 
-**Match-winning banner**: when a match is clinched, every phone with the app open gets a full-screen "TATE WINS 3&2" banner with confetti in the winner's team color (tap to dismiss). When the last match decides the tournament, a champions banner follows. Matches already final when you open the app don't replay.
+**Banners**: the captain reveal, every draft pick, and each clinched match ("TATE WINS 3&2") pop up full-screen on every phone with the app open, with confetti in the team color (tap to dismiss). When the last match decides the Cup, a champions banner follows. Things already done when you open the app don't replay.
 
 **Trip recap**: once the last match is final, the champion banner and the Trip tab link to a recap page with final standings, awards (MVP, Birdie King, Low Round, Hottest Hand, Longest Run, Crowd Favorite, Paparazzi), day-by-day results, the best photos and every player's rounds. Share it with a `#recap` link.
 

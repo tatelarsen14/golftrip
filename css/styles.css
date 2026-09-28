@@ -658,15 +658,88 @@ label.btn.disabled { opacity: .4; }
 /* Bracket Day */
 .bracket-picks { margin-top: 12px; border: 2px solid #d9ad4a; }
 .bracket-picks > p { font-size: 13px; margin: 4px 0 8px; }
-.bp-row { border-left: 5px solid var(--c); padding: 8px 10px; border-radius: 8px; background: var(--cream); margin-top: 6px; }
-.bp-row.turn { background: #fbf0d4; box-shadow: inset 0 0 0 1px #d9ad4a; }
-.bp-team { font-weight: 700; }
-.bp-team small { display: block; font-weight: 400; font-size: 12px; color: var(--muted); }
-.bp-seed { font: 700 13px Oswald, sans-serif; color: var(--muted); margin-right: 2px; }
-.bp-picked { display: flex; gap: 14px; margin-top: 4px; font-size: 14px; }
-.bp-picked b { display: inline-block; width: 18px; height: 18px; border-radius: 4px; background: var(--forest); color: var(--cream); text-align: center; font-size: 11px; line-height: 18px; margin-right: 4px; }
-.bp-choose { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
-.bp-choose button { border: 1px solid var(--forest); background: var(--paper); border-radius: 10px; padding: 8px 6px; font-weight: 700; color: var(--forest); }
-.bp-choose small { display: block; font-weight: 500; font-size: 11px; color: var(--muted); }
-.bp-wait { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .bc-next { font-size: 12px; color: #9fb5a9; text-align: center; padding: 6px 4px 10px; }
+
+/* Friday: Captain Round board */
+.cr-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.cr-head span:first-child { font: 700 18px Oswald, sans-serif; text-transform: uppercase; letter-spacing: .05em; color: var(--forest); }
+.cr-head span:last-child { font: 600 11px Inter, sans-serif; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.cr-card > .muted, .dr-card > .muted, .tp-card > .muted { font-size: 13px; margin: 4px 0 8px; }
+.cr-row { display: grid; grid-template-columns: 22px 1fr auto 44px; align-items: center; gap: 8px; padding: 8px 4px; border-top: 1px solid var(--line); }
+.cr-row.cap { background: #fbf0d4; border-radius: 8px; border-top-color: transparent; }
+.cr-rank { font: 700 15px Oswald, sans-serif; color: var(--muted); text-align: center; }
+.cr-name { font-weight: 700; min-width: 0; }
+.cr-name small { display: block; font-weight: 500; font-size: 11px; color: var(--muted); }
+.cr-c { display: inline-block; margin-left: 6px; width: 18px; height: 18px; border-radius: 50%; background: #b8860b; color: #fff;
+  font: 700 11px/18px Inter, sans-serif; text-align: center; vertical-align: 1px; }
+.cr-thru { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.cr-par { font: 700 18px Oswald, sans-serif; text-align: right; }
+.cr-par.under { color: var(--under); }
+
+/* the draft */
+.dr-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.dr-team { border-radius: 10px; background: var(--cream); border-top: 5px solid var(--c); padding: 8px 10px; }
+.dr-team.turn { box-shadow: inset 0 0 0 2px #d9ad4a; background: #fbf0d4; }
+.dr-name { font: 700 15px Oswald, sans-serif; text-transform: uppercase; letter-spacing: .04em; color: var(--c); }
+.dr-cap { font-weight: 700; margin-top: 2px; }
+.dr-cap small { font-weight: 600; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: #b8860b; margin-left: 4px; }
+.dr-team ol { margin: 4px 0 0; padding-left: 18px; font-size: 14px; }
+.dr-team li { padding: 2px 0; font-weight: 600; }
+.dr-team li.open { color: var(--muted); font-weight: 400; font-style: italic; }
+.dr-clock { margin: 10px 0 6px; font-size: 14px; }
+.dr-pool { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.dr-pool button { border: 1px solid var(--forest); background: var(--paper); border-radius: 10px; padding: 10px 4px; font-weight: 700; color: var(--forest); }
+.dr-pool button.on { background: var(--forest); color: var(--cream); }
+.dr-wait { margin: 4px 0 0; font-size: 13px; }
+.dr-edit { border-left: 5px solid var(--c); background: var(--cream); border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
+.dr-edit label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); }
+.dr-edit input { margin-top: 4px; font-weight: 700; }
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 2px; }
+.sw { width: 30px; height: 30px; border-radius: 50%; border: 3px solid var(--paper); background: var(--sw); box-shadow: 0 0 0 1px var(--line); padding: 0; }
+.sw.on { box-shadow: 0 0 0 3px var(--ink); }
+.sw:disabled { opacity: .2; }
+
+/* Tuesday: the leader sets the matchups */
+.tp-slot { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--cream); margin-top: 6px; font-weight: 600; font-size: 14px; }
+.tp-slot.on { background: #fbf0d4; box-shadow: inset 0 0 0 1px #d9ad4a; }
+.tp-label { font: 600 10px Inter, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+.tp-pick { margin-top: 10px; }
+.tp-team { font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+.tp-back { font-size: 13px; margin: 10px 0; }
+.tp-card .btn { width: 100%; }
+.tp-card .link { padding: 8px 0 0; }
+
+/* skins */
+.sk-empty { font-size: 14px; }
+.sk-sum { font: 600 11px Inter, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+.sk-row { display: grid; grid-template-columns: 1fr auto 64px; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.sk-name { font-weight: 600; }
+.sk-n { font-size: 12px; color: var(--muted); }
+.sk-v { text-align: right; font: 700 16px Oswald, sans-serif; }
+.sk-v.up { color: var(--win); }
+.sk-v.down { color: var(--under); }
+.sk-recent { margin: 8px 0; background: var(--cream); border-radius: 10px; padding: 4px 10px; }
+.sk-hole { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; font-size: 13px; }
+.sk-hole + .sk-hole { border-top: 1px solid var(--line); }
+.sk-hole .mk { margin-left: 4px; }
+.sk-settle { margin-top: 8px; font-size: 14px; }
+.skin-tag { font: 600 11px Inter, sans-serif; background: #fbf0d4; color: #8a6414; border-radius: 99px; padding: 2px 7px; vertical-align: 3px; letter-spacing: 0; }
+
+/* Cup before the draft */
+.cup-empty { padding: 14px 16px; font-size: 14px; color: #cfe3d4; }
+
+/* setup */
+.setup-p { margin: 0 0 6px; font-size: 14px; }
+.setup-sub { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+.setup-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
+.setup-actions .link { padding: 0; }
+.link.danger { color: var(--under); }
+.cap-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.cap-grid .player-chip { font-size: 14px; padding: 8px 2px; }
+.cap-grid small { display: block; font-size: 10px; color: #8a6414; }
+.four { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 8px; }
+.four .player-chip { font-size: 14px; padding: 8px 2px; }
+.four .player-chip:first-child::after { content: ' C'; font-size: 10px; color: #b8860b; font-weight: 700; }
+.stack { display: grid; gap: 6px; }
+.bc-sub { font: 600 11px Inter, sans-serif; letter-spacing: .06em; text-transform: uppercase; opacity: .7; margin-top: 2px; }
+.sk-name .dot { margin-right: 6px; }

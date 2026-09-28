@@ -15,24 +15,37 @@ const FIREBASE_VERSION = '10.12.2';
 const LOCAL_KEY = `golftrip:${TRIP_ID}`;
 export const MAX_VIDEO_MB = 200;
 
-// Saved setup layered over the defaults. Each saved round is merged over its
-// default so newer fields (like Tuesday's seeding) reach configs saved
-// before they existed. Pars always come from the scorecards in data.js.
+// Saved setup layered over the defaults. Saved rounds only carry what Setup
+// can change (on/off, course name, Friday groups, singles swaps) and are
+// merged over the defaults by id. Setups saved before the teams-of-4 format
+// (no `v: 2`) are ignored. Pars always come from the scorecards in data.js.
+const SAVED_ROUND_FIELDS = ['id', 'enabled', 'course', 'groups'];
 function withDefaults(saved) {
   const config = structuredClone(DEFAULT_CONFIG);
-  if (saved?.teams) config.teams = saved.teams;
-  config.puttoffs = saved?.puttoffs || {};
-  config.bracketPicks = saved?.bracketPicks || {};
-  if (saved?.rounds) {
-    config.rounds = saved.rounds
-      .filter((r) => r.id !== 'fri') // Friday was dropped after launch
-      .map((r) => ({ ...DEFAULT_CONFIG.rounds.find((d) => d.id === r.id), ...r }));
+  if (saved?.v !== DEFAULT_CONFIG.v) return config;
+  config.teams = saved.teams || [];
+  config.draft = { captains: saved.draft?.captains || [], picks: saved.draft?.picks || [] };
+  config.tuePicks = { pairs: (saved.tuePicks?.pairs || []).map((x) => (typeof x === 'string' ? x.split('|') : x)) };
+  config.puttoffs = saved.puttoffs || {};
+  for (const r of saved.rounds || []) {
+    const round = config.rounds.find((d) => d.id === r.id);
+    if (!round) continue;
+    for (const f of SAVED_ROUND_FIELDS) if (r[f] != null) round[f] = r[f];
   }
   return config;
 }
 
-// Only teams, pairings, putt-offs and bracket picks are saved; pars are fixed.
-const setupFields = ({ teams, rounds, puttoffs = {}, bracketPicks = {} }) => JSON.parse(JSON.stringify({ teams, rounds, puttoffs, bracketPicks }));
+// Only the setup is saved; pars and formats are fixed. Arrays and full
+// objects every time, so a reset overwrites (Firestore merges nested maps).
+const setupFields = ({ teams = [], draft, tuePicks, rounds, puttoffs = {} }) => JSON.parse(JSON.stringify({
+  v: DEFAULT_CONFIG.v,
+  teams,
+  draft: { captains: draft?.captains || [], picks: draft?.picks || [] },
+  // Firestore can't hold arrays inside arrays, so each matchup is "a|b".
+  tuePicks: { pairs: (tuePicks?.pairs || []).map((x) => (Array.isArray(x) ? x.join('|') : x)) },
+  rounds: rounds.map((r) => Object.fromEntries(SAVED_ROUND_FIELDS.map((f) => [f, r[f] ?? null]))),
+  puttoffs,
+}));
 
 const newId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
@@ -94,8 +107,14 @@ function createLocalStore(onChange) {
       persist();
     },
     async saveConfig(config) {
-      store.config = { ...store.config, ...setupFields(config) };
+      store.config = withDefaults(setupFields(config));
       persist();
+    },
+    // Read-check-write on the latest setup; `fn` throws to cancel.
+    async updateConfig(fn) {
+      const config = structuredClone(store.config);
+      fn(config);
+      await store.saveConfig(config);
     },
     async addPost(post) {
       store.posts = [{ ...post, id: newId(), at: Date.now() }, ...store.posts];
@@ -199,9 +218,20 @@ async function createFirebaseStore(onChange) {
       await fs.setDoc(ref, update, { merge: true });
     },
     async saveConfig(config) {
-      store.config = { ...store.config, ...setupFields(config) };
+      store.config = withDefaults(setupFields(config));
       onChange();
       await fs.setDoc(configRef, setupFields(config), { merge: true });
+    },
+    // Read-check-write on the latest saved setup in a transaction, so two
+    // phones acting at once (like draft picks) can't overwrite each other.
+    // `fn` throws to cancel.
+    async updateConfig(fn) {
+      await fs.runTransaction(db, async (tx) => {
+        const snap = await tx.get(configRef);
+        const config = withDefaults(snap.exists() ? snap.data() : null);
+        fn(config);
+        tx.set(configRef, setupFields(config), { merge: true });
+      });
     },
     async addPost(post) {
       await fs.addDoc(postsCol, { ...post, at: fs.serverTimestamp() });

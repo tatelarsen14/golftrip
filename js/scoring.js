@@ -1,49 +1,75 @@
-// Pure match-play scoring logic. No DOM, no storage — easy to test.
+// Pure scoring logic. No DOM, no storage — easy to test.
 
 export const FRONT_NINE = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 export const BACK_NINE = [10, 11, 12, 13, 14, 15, 16, 17, 18];
 
 export const POINTS = { win: 1, halve: 0.5, loss: 0 };
+// Quicksands (team stroke play) is worth 2; Tuesday's back 9 singles are worth 2 each.
+export const TEAMSTROKE_POINTS = 2;
+export const ESCALATING_BACK_POINTS = 2;
 
-// Every day: each group (two teams of two) plays a best ball match on the
-// front nine, then two singles matches on the back nine.
+// Holes in a round (18, or 14 at Quicksands), and its two halves.
+export const holesOf = (round) => Array.from({ length: round?.holes || 18 }, (_, i) => i + 1);
+export function halvesOf(round) {
+  const all = holesOf(round);
+  const n = Math.ceil(all.length / 2);
+  return [all.slice(0, n), all.slice(n)];
+}
+
+// Everyone in a tee group, with their team (0 or 1, or -1 before the draft).
+export function groupRoster(group) {
+  if (group.players) return group.players.map((id) => ({ id, team: -1 }));
+  return [...(group.a || []).map((id) => ({ id, team: 0 })), ...(group.b || []).map((id) => ({ id, team: 1 }))];
+}
+
+// Most points a round is worth, across both teams.
+export function roundPoints(round) {
+  if (round.format === 'match') return 6;
+  if (round.format === 'teamstroke') return TEAMSTROKE_POINTS;
+  if (round.format === 'escalating') return 2 * (2 * POINTS.win + 2 * ESCALATING_BACK_POINTS);
+  return 0;
+}
+
+// Matches for every enabled round whose matchups are set (see resolveConfig):
+// - match: per group, best ball a v b on the front, two singles on the back
+// - teamstroke: one team-vs-team match over every hole
+// - escalating: per group, two singles on the front (1 pt), opponents swap for the back (2 pts)
 export function buildMatches(config) {
   const matches = [];
   for (const round of config.rounds) {
     if (!round.enabled || round.pending) continue;
-    if (round.format === 'bracket') {
-      matches.push(...bracketMatches(config, round));
+    const [front, back] = halvesOf(round);
+    if (round.format === 'teamstroke') {
+      if (config.teams?.length !== 2) continue;
+      matches.push({
+        roundId: round.id, group: -1, id: `${round.id}-team`, type: 'teamstroke', label: `Team stroke play · ${TEAMSTROKE_POINTS} pts`,
+        weight: TEAMSTROKE_POINTS, holes: holesOf(round), pars: config.pars?.[round.id] || {},
+        sides: config.teams.map((t, team) => ({ team, players: [...t.players] })),
+      });
       continue;
     }
-    round.groups.forEach((group, gi) => {
-      const [ta, tb] = group.teams;
-      const teamA = config.teams[ta];
-      const teamB = config.teams[tb];
-      if (!teamA || !teamB) return;
+    if (round.format !== 'match' && round.format !== 'escalating') continue;
+    round.groups.forEach((g, gi) => {
+      // Groups hold player ids once resolved; draft slots before that.
+      if (typeof g.a?.[0] !== 'string' || typeof g.b?.[0] !== 'string') return;
       const base = { roundId: round.id, group: gi };
-      matches.push({
-        ...base,
-        id: `${round.id}-g${gi + 1}-bb`,
-        type: 'bestball',
-        holes: FRONT_NINE,
-        sides: [
-          { team: ta, players: [...teamA.players] },
-          { team: tb, players: [...teamB.players] },
-        ],
+      const one = (id, type, holes, [pa, pb], extra = {}) => ({
+        ...base, id, type, holes, ...extra,
+        sides: [{ team: 0, players: [g.a[pa]] }, { team: 1, players: [g.b[pb]] }],
       });
-      const pairs = group.cross ? [[0, 1], [1, 0]] : [[0, 0], [1, 1]];
-      pairs.forEach(([pa, pb], si) => {
+      if (round.format === 'match') {
         matches.push({
-          ...base,
-          id: `${round.id}-g${gi + 1}-s${si + 1}`,
-          type: 'singles',
-          holes: BACK_NINE,
-          sides: [
-            { team: ta, players: [teamA.players[pa]] },
-            { team: tb, players: [teamB.players[pb]] },
-          ],
+          ...base, id: `${round.id}-g${gi + 1}-bb`, type: 'bestball', holes: front,
+          sides: [{ team: 0, players: [...g.a] }, { team: 1, players: [...g.b] }],
         });
-      });
+        const pairs = g.cross ? [[0, 1], [1, 0]] : [[0, 0], [1, 1]];
+        pairs.forEach((pair, si) => matches.push(one(`${round.id}-g${gi + 1}-s${si + 1}`, 'singles', back, pair)));
+        return;
+      }
+      [[0, 0], [1, 1]].forEach((pair, si) => matches.push(one(`${round.id}-g${gi + 1}-f${si + 1}`, 'singles', front, pair,
+        { label: 'Singles · Front 9 · 1 pt', weight: 1 })));
+      [[0, 1], [1, 0]].forEach((pair, si) => matches.push(one(`${round.id}-g${gi + 1}-b${si + 1}`, 'singles', back, pair,
+        { label: `Singles · Back 9 · ${ESCALATING_BACK_POINTS} pts`, weight: ESCALATING_BACK_POINTS })));
     });
   }
   return matches;
@@ -62,8 +88,52 @@ export function sideScore(roundScores, players, hole) {
   return vals.length ? Math.min(...vals) : null;
 }
 
+// Team stroke play: every player's score counts. Live, teams are compared on
+// score to par for the holes each player has in (so a group that's further
+// along isn't penalized); final, on total strokes.
+function computeTeamStroke(match, roundScores) {
+  const total = match.holes.length;
+  const sides = match.sides.map((side) => {
+    let strokes = 0;
+    let toPar = 0;
+    let entered = 0;
+    let thru = total;
+    for (const p of side.players) {
+      const sc = roundScores?.[p] || {};
+      const done = match.holes.filter((h) => isScore(sc[h]));
+      thru = Math.min(thru, done.length);
+      entered += done.length;
+      for (const h of done) {
+        strokes += sc[h];
+        toPar += sc[h] - (match.pars[h] || 0);
+      }
+    }
+    return { strokes, toPar, entered, thru };
+  });
+  const played = Math.min(...sides.map((s) => s.thru));
+  const started = sides.some((s) => s.entered > 0);
+  const done = sides.every((s) => s.thru === total);
+  const diff = sides[1].toPar - sides[0].toPar; // > 0: side 0 is ahead
+  const leader = diff > 0 ? 0 : diff < 0 ? 1 : null;
+  const up = Math.abs(diff);
+  const w = match.weight || TEAMSTROKE_POINTS;
+  const projected = !started ? null : leader === null ? [w / 2, w / 2] : leader === 0 ? [w, 0] : [0, w];
+  let status;
+  if (!started) status = 'Not started';
+  else if (done && leader === null) status = 'Tied';
+  else if (done) status = `Won by ${up}`;
+  else if (leader === null) status = 'All square';
+  else status = `${up} ahead`;
+  return {
+    played, remaining: total - played, done, diff, leader, up, status, sides,
+    points: done ? projected : null, projected,
+    holes: match.holes.map((hole) => ({ hole, a: null, b: null, winner: null, diff: null })),
+  };
+}
+
 // Returns the live state of one match. `diff` > 0 means side 0 is up.
 export function computeMatch(match, roundScores) {
+  if (match.type === 'teamstroke') return computeTeamStroke(match, roundScores);
   const total = match.holes.length;
   let diff = 0;
   let played = 0;
@@ -92,7 +162,7 @@ export function computeMatch(match, roundScores) {
   let points = null; // final points, only once the match is decided
   let projected = null; // "if it ended right now"
   if (played > 0) {
-    // Bracket finals are worth more (`weight`); a halve splits whatever it's worth.
+    // Tuesday's back 9 is worth more (`weight`); a halve splits whatever it's worth.
     const w = match.weight || 1;
     projected = leader === null ? [POINTS.halve * w, POINTS.halve * w]
       : leader === 0 ? [POINTS.win * w, POINTS.loss] : [POINTS.loss, POINTS.win * w];
@@ -113,32 +183,34 @@ export function computeMatch(match, roundScores) {
 
 // Team and individual standings across every enabled round.
 // Best ball results credit both teammates individually; singles credit the
-// one player. Team totals = best ball points + their players' singles points.
+// one player. Team totals = the points from every match.
 export function computeStandings(config, scores) {
   const matches = buildMatches(config);
-  const teams = config.teams.map((t, idx) => ({
+  const teams = (config.teams || []).map((t, idx) => ({
     idx, name: t.name, players: t.players, points: 0, projected: 0, w: 0, l: 0, h: 0,
   }));
   const players = {};
-  config.teams.forEach((t, idx) => t.players.forEach((p) => {
+  (config.teams || []).forEach((t, idx) => t.players.forEach((p) => {
     players[p] = { id: p, team: idx, points: 0, projected: 0, w: 0, l: 0, h: 0 };
   }));
 
   const results = matches.map((m) => {
     const res = computeMatch(m, scores[m.roundId]);
     m.sides.forEach((side, si) => {
-      const credit = (row) => {
+      const credit = (row, share = 1) => {
         if (!row) return;
         if (res.points) {
-          row.points += res.points[si];
+          row.points += res.points[si] * share;
           if (res.leader === null) row.h++;
           else if (res.leader === si) row.w++;
           else row.l++;
         }
-        if (res.projected) row.projected += res.projected[si];
+        if (res.projected) row.projected += res.projected[si] * share;
       };
       credit(teams[side.team]);
-      side.players.forEach((p) => credit(players[p]));
+      // Team stroke play is split between the four players.
+      const share = m.type === 'teamstroke' ? 1 / side.players.length : 1;
+      side.players.forEach((p) => credit(players[p], share));
     });
     return { match: m, result: res };
   });
@@ -163,9 +235,9 @@ export function scoreMark(score, par) {
 }
 
 // Birdies per player across every enabled round; an eagle or better counts as a birdie.
-export function birdieCounts(config, scores) {
+export function birdieCounts(config, scores, playerIds) {
   const counts = {};
-  config.teams.forEach((t) => t.players.forEach((p) => { counts[p] = { id: p, birdies: 0 }; }));
+  playerIds.forEach((p) => { counts[p] = { id: p, birdies: 0 }; });
   for (const round of config.rounds) {
     if (!round.enabled) continue;
     for (const [pid, holes] of Object.entries(scores[round.id] || {})) {
@@ -182,17 +254,17 @@ export function birdieCounts(config, scores) {
 // ---------- Ranking, tiebreakers and seeding ----------
 
 // Tiebreakers, in order, when teams are level on points.
+// (With two teams, head-to-head is just the points, so it isn't one.)
 export const TIEBREAKERS = [
-  { key: 'h2h', label: 'Head-to-head points' },
   { key: 'wins', label: 'Most matches won' },
   { key: 'margin', label: 'Holes-up margin' },
   { key: 'strokes', label: 'Fewest total strokes' },
   { key: 'puttoff', label: 'Putt-off' },
 ];
 
-// Putt-off results are stored per stage ('seed' after the earlier rounds,
-// 'final' after the last) and per group of tied teams, as team indexes in
-// finishing order.
+// Putt-off results are stored per stage ('seed' after Monday, 'final' after
+// the last round, 'captain' for Friday) and per group of tied teams or
+// players, in finishing order.
 export const puttoffKey = (teamIdxs) => [...teamIdxs].sort((a, b) => a - b).join('-');
 
 // Ranks teams on final match results in the given rounds.
@@ -203,8 +275,8 @@ export const puttoffKey = (teamIdxs) => [...teamIdxs].sort((a, b) => a - b).join
 // - ties: one entry per group of teams level on points, with every
 //   tiebreaker step it took to separate them.
 export function rankTeams(config, scores, roundIds, stage = 'final') {
-  const stats = config.teams.map((t, idx) => ({
-    idx, name: t.name, players: t.players, points: 0, wins: 0, margin: 0, strokes: 0, h2h: {},
+  const stats = (config.teams || []).map((t, idx) => ({
+    idx, name: t.name, players: t.players, points: 0, wins: 0, margin: 0, strokes: 0,
   }));
 
   for (const m of buildMatches(config).filter((x) => roundIds.includes(x.roundId))) {
@@ -212,11 +284,10 @@ export function rankTeams(config, scores, roundIds, stage = 'final') {
     if (!res.points) continue;
     m.sides.forEach((side, si) => {
       const t = stats[side.team];
-      const opp = m.sides[1 - si].team;
       t.points += res.points[si];
-      t.h2h[opp] = (t.h2h[opp] || 0) + res.points[si];
       if (res.leader === si) t.wins++;
-      if (res.leader !== null) t.margin += res.leader === si ? res.up : -res.up;
+      // Holes-up margin is match play only (Quicksands is counted in strokes).
+      if (res.leader !== null && m.type !== 'teamstroke') t.margin += res.leader === si ? res.up : -res.up;
     });
   }
   for (const t of stats) {
@@ -230,12 +301,8 @@ export function rankTeams(config, scores, roundIds, stage = 'final') {
   const puttoffs = config.puttoffs?.[stage] || {};
   const keys = ['points', ...TIEBREAKERS.map((tb) => tb.key)];
   // Display value and sort value (higher sorts first) for one criterion.
-  const measure = (t, key, tied, putKey) => {
+  const measure = (t, key, putKey) => {
     if (key === 'points') return [t.points, t.points];
-    if (key === 'h2h') {
-      const v = tied.reduce((a, o) => a + (o === t ? 0 : t.h2h[o.idx] || 0), 0);
-      return [v, v];
-    }
     if (key === 'strokes') return [t.strokes, -t.strokes];
     if (key === 'puttoff') {
       const pos = (puttoffs[putKey] || []).indexOf(t.idx);
@@ -245,8 +312,7 @@ export function rankTeams(config, scores, roundIds, stage = 'final') {
   };
 
   const ties = [];
-  // Split a group by criterion k, recording each tiebreaker step. Head-to-head
-  // only counts matches among the teams still tied at that step.
+  // Split a group by criterion k, recording each tiebreaker step.
   const order = (group, k, tie, putKey) => {
     if (group.length === 1) return group;
     if (k === keys.length) {
@@ -259,7 +325,7 @@ export function rankTeams(config, scores, roundIds, stage = 'final') {
     const buckets = new Map();
     const values = {};
     for (const t of group) {
-      const [shown, v] = measure(t, key, group, pk);
+      const [shown, v] = measure(t, key, pk);
       values[t.idx] = shown;
       if (!buckets.has(v)) buckets.set(v, []);
       buckets.get(v).push(t);
@@ -288,47 +354,216 @@ export function rankTeams(config, scores, roundIds, stage = 'final') {
   return { ranked, ties };
 }
 
-// Fills in seeded rounds: 1st v 2nd and 3rd v 4th on the standings from the
-// earlier rounds, once every one of those matches is final. Until then the
-// round is `pending` (matchups TBD) and `seeding` holds the matchups as they
-// stand right now. A tie between 2nd and 3rd that only a putt-off can break
-// also keeps it pending (`needsPuttoff`).
+// Tuesday's four matchups as [team 0 player, team 1 player], if all four
+// are set and valid.
+export function tuesdayPairs(config) {
+  const pairs = config.tuePicks?.pairs || [];
+  const [t0, t1] = config.teams || [];
+  if (pairs.length !== 4 || !t0 || !t1) return null;
+  const used = new Set(pairs.flat());
+  const ok = used.size === 8 && pairs.every(([x, y]) => t0.players.includes(x) && t1.players.includes(y));
+  return ok ? pairs : null;
+}
+
+// Fills in who plays who, round by round:
+// - Friday (stroke) groups are fixed player lists.
+// - Until the draft sets the two teams, every other round is `pending`.
+// - Sat-Mon and Quicksands groups turn draft slots into players.
+// - Tuesday waits for every earlier match to be final (`priorFinal`), then
+//   for the leader (`leader`; a putt-off if the tiebreakers can't split
+//   them, `needsPuttoff`), then for the leader's matchups (`needsPicks`).
+//   `leaderNow` is who'd be picking if it ended right now.
 export function resolveConfig(config, scores) {
   const resolved = structuredClone(config);
-  const enabled = resolved.rounds.filter((r) => r.enabled);
-  enabled.forEach((round, i) => {
-    if (!round.seeded) return;
-    const prior = enabled.slice(0, i);
-    const priorIds = prior.map((r) => r.id);
-    const priorMatches = buildMatches({ ...resolved, rounds: prior });
-    const ready = prior.length > 0
-      && priorMatches.every((m) => computeMatch(m, scores[m.roundId]).done);
-    const { ranked } = rankTeams(resolved, scores, priorIds, 'seed');
-    round.priorIds = priorIds;
-    round.priorFinal = ready;
-    if (round.format === 'bracket') {
-      // Every seed matters in a bracket (1 v 4, 2 v 3), so any tie left for a
-      // putt-off holds it up.
-      round.seeding = [[ranked[0].idx, ranked[3].idx], [ranked[1].idx, ranked[2].idx]];
-      if (!ready || ranked.some((t) => t.unresolved)) {
-        round.pending = true;
-        round.needsPuttoff = ready;
-        return;
-      }
-      resolveBracket(resolved, round, scores, ranked.map((t) => t.idx));
-      return;
-    }
-    const seeding = [[ranked[0].idx, ranked[1].idx], [ranked[2].idx, ranked[3].idx]];
-    round.seeding = seeding;
-    const splitUndecided = ranked[1].unresolved && ranked[2].unresolved && ranked[1].rank === ranked[2].rank;
-    if (ready && !splitUndecided) {
-      round.groups = seeding.map((teams, gi) => ({ teams, cross: !!round.groups[gi]?.cross }));
-    } else {
+  const teams = resolved.teams || [];
+  const teamsReady = teams.length === 2 && teams.every((t) => t.players?.length === 4);
+  const earlier = [];
+  for (const round of resolved.rounds) {
+    if (!round.enabled || round.format === 'stroke') continue;
+    if (!teamsReady) {
       round.pending = true;
-      round.needsPuttoff = ready && splitUndecided;
+      round.waitingOn = 'draft';
+      continue;
     }
-  });
+    if (round.format === 'escalating') {
+      const priorIds = earlier.map((r) => r.id);
+      const ready = earlier.length > 0
+        && buildMatches({ ...resolved, rounds: earlier }).every((m) => computeMatch(m, scores[m.roundId]).done);
+      const { ranked } = rankTeams(resolved, scores, priorIds, 'seed');
+      round.priorIds = priorIds;
+      round.priorFinal = ready;
+      round.leaderNow = ranked[0].unresolved ? null : ranked[0].idx;
+      round.leader = ready && !ranked[0].unresolved ? ranked[0].idx : null;
+      const pairs = tuesdayPairs(resolved);
+      if (!ready) {
+        round.pending = true;
+        round.waitingOn = 'standings';
+      } else if (round.leader === null) {
+        round.pending = true;
+        round.needsPuttoff = true;
+      } else if (!pairs) {
+        round.pending = true;
+        round.needsPicks = true;
+      } else {
+        round.groups = [0, 1].map((gi) => ({
+          a: [pairs[gi * 2][0], pairs[gi * 2 + 1][0]],
+          b: [pairs[gi * 2][1], pairs[gi * 2 + 1][1]],
+        }));
+      }
+    } else {
+      round.groups = round.groups.map((g) => ({
+        a: g.a.map((i) => teams[0].players[i]),
+        b: g.b.map((i) => teams[1].players[i]),
+        cross: !!g.cross,
+      }));
+    }
+    earlier.push(round);
+  }
   return resolved;
+}
+
+// ---------- Friday: Captain Round and the draft ----------
+
+// Friday's stroke play leaderboard. Live, it's sorted by score to par; once
+// everyone has 18 holes in, by total, then back 9, then a putt-off (only if
+// the tie decides a captain spot or who picks first).
+// Returns { round, rows, allDone, captains, puttoff }.
+export function captainRound(config, scores) {
+  const round = config.rounds.find((r) => r.format === 'stroke' && r.enabled);
+  if (!round) return null;
+  const holes = holesOf(round);
+  const [, back] = halvesOf(round);
+  const pars = config.pars?.[round.id] || {};
+  const rows = round.groups.flatMap((g) => g.players).map((id) => {
+    const sc = scores[round.id]?.[id] || {};
+    const played = holes.filter((h) => isScore(sc[h]));
+    return {
+      id,
+      thru: played.length,
+      gross: played.reduce((a, h) => a + sc[h], 0),
+      back: back.filter((h) => isScore(sc[h])).reduce((a, h) => a + sc[h], 0),
+      toPar: played.reduce((a, h) => a + sc[h] - (pars[h] || 0), 0),
+      done: played.length === holes.length,
+      tiebreak: null,
+      unresolved: false,
+    };
+  });
+  const allDone = rows.length > 0 && rows.every((r) => r.done);
+  if (!allDone) {
+    rows.sort((a, b) => (b.thru > 0) - (a.thru > 0) || a.toPar - b.toPar || b.thru - a.thru);
+    rows.forEach((r, i) => {
+      const prev = rows[i - 1];
+      r.rank = prev && prev.thru && r.thru && prev.toPar === r.toPar ? prev.rank : i + 1;
+    });
+    return { round, rows, allDone, captains: null, puttoff: null };
+  }
+
+  const recorded = config.puttoffs?.captain || {};
+  let puttoff = null;
+  const ranked = [];
+  const byKey = (key) => {
+    const m = new Map();
+    return (list) => {
+      m.clear();
+      list.forEach((r) => { const k = key(r); if (!m.has(k)) m.set(k, []); m.get(k).push(r); });
+      return [...m.entries()].sort((x, y) => x[0] - y[0]).map(([, g]) => g);
+    };
+  };
+  for (const same of byKey((r) => r.gross)(rows)) {
+    if (same.length > 1) same.forEach((r) => { r.tiebreak = 'Back 9'; });
+    for (const tied of byKey((r) => r.back)(same)) {
+      if (tied.length === 1) { ranked.push(tied[0]); continue; }
+      const key = puttoffKey(tied.map((r) => r.id));
+      const order = (recorded[key] || []).filter((id) => tied.some((r) => r.id === id));
+      const done = order.map((id) => tied.find((r) => r.id === id));
+      const left = tied.filter((r) => !order.includes(r.id));
+      done.forEach((r) => { r.tiebreak = 'Putt-off'; });
+      ranked.push(...done);
+      if (left.length === 1) {
+        left[0].tiebreak = 'Putt-off';
+        ranked.push(left[0]);
+        continue;
+      }
+      // Still tied: only matters if it decides a captain spot or the first pick.
+      if (ranked.length <= 1 && !puttoff) puttoff = { key, players: tied.map((r) => r.id), done: order };
+      left.forEach((r) => { r.unresolved = true; });
+      ranked.push(...left);
+    }
+  }
+  ranked.forEach((r, i) => {
+    const prev = ranked[i - 1];
+    r.rank = prev && r.unresolved && prev.unresolved && prev.gross === r.gross && prev.back === r.back ? prev.rank : i + 1;
+  });
+  return { round, rows: ranked, allDone, captains: puttoff ? null : [ranked[0].id, ranked[1].id], puttoff };
+}
+
+// Where the draft is: captains (from Friday, or set by hand in Setup), then
+// alternating picks with the low score first, until everyone's on a team.
+// `rosters[i]` is team i so far, captain first.
+export function draftState(config, scores, playerIds) {
+  const cr = captainRound(config, scores);
+  const manual = config.draft?.captains?.length === 2 ? config.draft.captains : null;
+  const captains = manual || cr?.captains || null;
+  if (!captains) return { stage: 'captains', cr, captains: null };
+  const picks = [];
+  for (const p of config.draft?.picks || []) {
+    if (playerIds.includes(p) && !captains.includes(p) && !picks.includes(p)) picks.push(p);
+  }
+  const pool = playerIds.filter((p) => !captains.includes(p) && !picks.includes(p));
+  const rosters = [[captains[0]], [captains[1]]];
+  picks.forEach((p, i) => rosters[i % 2].push(p));
+  const done = pool.length === 0;
+  return {
+    stage: done ? 'done' : 'drafting', cr, captains, manual: !!manual, picks, pool, rosters,
+    turn: done ? null : picks.length % 2,
+  };
+}
+
+// ---------- Skins ----------
+
+// Every par 3 (or every hole, for `skins: 'all'`) in rounds with skins. Once
+// everyone has a score on the hole, the outright low score wins `stake` from
+// each other player; any tie for low and nobody wins it. Nothing carries.
+// Returns { holes: [{ roundId, hole, par, winner, score, tied, waiting }], net }.
+export function computeSkins(config, scores, playerIds, stake = 5) {
+  const net = Object.fromEntries(playerIds.map((p) => [p, 0]));
+  const holes = [];
+  for (const round of config.rounds) {
+    if (!round.enabled || !round.skins) continue;
+    for (const hole of holesOf(round)) {
+      const par = parFor(config, round.id, hole);
+      if (round.skins === 'par3' && par !== 3) continue;
+      const vals = playerIds.map((p) => scores[round.id]?.[p]?.[hole]);
+      const row = { roundId: round.id, hole, par, winner: null, score: null, tied: [], waiting: [] };
+      holes.push(row);
+      row.waiting = playerIds.filter((p, i) => !isScore(vals[i]));
+      if (row.waiting.length) continue;
+      row.score = Math.min(...vals);
+      const low = playerIds.filter((p, i) => vals[i] === row.score);
+      if (low.length > 1) { row.tied = low; continue; }
+      row.winner = low[0];
+      playerIds.forEach((p) => { net[p] += p === row.winner ? stake * (playerIds.length - 1) : -stake; });
+    }
+  }
+  return { holes, net };
+}
+
+// Fewest payments that settle everyone's net: biggest debtor pays biggest winner.
+export function settleUp(net) {
+  const owe = Object.entries(net).filter(([, v]) => v < 0).map(([p, v]) => ({ p, v: -v })).sort((a, b) => b.v - a.v);
+  const get = Object.entries(net).filter(([, v]) => v > 0).map(([p, v]) => ({ p, v })).sort((a, b) => b.v - a.v);
+  const out = [];
+  while (owe.length && get.length) {
+    const amt = Math.min(owe[0].v, get[0].v);
+    out.push({ from: owe[0].p, to: get[0].p, amount: amt });
+    owe[0].v -= amt;
+    get[0].v -= amt;
+    if (!owe[0].v) owe.shift();
+    if (!get[0].v) get.shift();
+    owe.sort((a, b) => b.v - a.v);
+    get.sort((a, b) => b.v - a.v);
+  }
+  return out;
 }
 
 // ---------- Streaks, highlights and recap stats ----------
@@ -395,14 +630,14 @@ export function longestBirdieRun(config, scores, playerId) {
 // Automatic feed items worked out from the scores, so no phone has to post
 // them and they fix themselves if a score is corrected. `times` gives when
 // each hole was scored; every item has a stable id for reactions/comments.
-export function highlights(config, scores, times) {
+export function highlights(config, scores, times, playerIds) {
   const items = [];
   const at = (roundId, players, hole) => Math.max(0, ...players.map((p) => times?.[roundId]?.[p]?.[hole] || 0));
 
   for (const round of config.rounds) {
     if (!round.enabled) continue;
-    for (const team of config.teams) {
-      for (const pid of team.players) {
+    {
+      for (const pid of playerIds) {
         const sc = scores[round.id]?.[pid] || {};
         // One item per birdie, plus one per run of 2+ that grows in place
         // (keyed by the run's first hole, so reactions stay with it).
@@ -417,7 +652,8 @@ export function highlights(config, scores, times) {
           }
           start = 0;
         };
-        for (let h = 1; h <= 18; h++) {
+        const last = holesOf(round).length;
+        for (let h = 1; h <= last; h++) {
           const par = parFor(config, round.id, h);
           if (!isBirdieOrBetter(sc[h], par)) { endRun(h - 1); continue; }
           if (!start) start = h;
@@ -427,7 +663,7 @@ export function highlights(config, scores, times) {
             roundId: round.id, hole: h, at: at(round.id, [pid], h),
           });
         }
-        endRun(18);
+        endRun(last);
       }
     }
   }
@@ -456,7 +692,7 @@ export function highlights(config, scores, times) {
     }
     endRun();
     if (res.done) {
-      const last = [...res.holes].reverse().find((h) => h.winner !== null);
+      const last = [...res.holes].reverse().find((h) => h.winner !== null) || res.holes[res.holes.length - 1];
       items.push({
         id: `hl-${match.id}-final`, type: 'matchFinal', match, res,
         roundId: match.roundId, hole: last.hole, at: at(match.roundId, everyone, last.hole),
@@ -475,73 +711,4 @@ export function roundTotals(config, scores, playerId) {
     const par = Object.values(config.pars?.[r.id] || {}).reduce((a, b) => a + b, 0);
     return { roundId: r.id, day: r.day, course: r.course, gross: holes.reduce((a, b) => a + b, 0), holes: holes.length, par };
   });
-}
-
-// ---------- Bracket Day (Tuesday) ----------
-//
-// Seeds 1-4 from the standings after the earlier rounds. Each team puts one
-// player in Bracket A and the other in Bracket B (picked in order 4th, 3rd,
-// 2nd, 1st, so the leader picks last). In each bracket, the front 9 is
-// semifinals (1 v 4, 2 v 3) and the back 9 is the final (semi winners) and
-// 3rd place (semi losers). A halved semi is ½ each, and the higher seed
-// advances.
-
-export const BRACKETS = ['A', 'B'];
-export const BRACKET_POINTS = { semi: 1, final: 2, third: 1 };
-
-// The order teams make their A/B picks: last seed first.
-export const pickOrder = (seeds) => [...seeds].reverse();
-
-// Semifinal matches for one bracket group; finals once the group has them.
-function bracketMatches(config, round) {
-  const matches = [];
-  round.groups.forEach((group, gi) => {
-    if (!group.players) return; // not set until the picks are in
-    const seat = (seed) => ({ team: group.teams[seed], players: [group.players[seed]], seed: seed + 1 });
-    const base = { roundId: round.id, group: gi, type: 'singles', bracket: group.bracket };
-    matches.push(
-      { ...base, id: `${round.id}-${group.bracket}-semi1`, stage: 'semi', label: 'Semifinal · 1 v 4', weight: BRACKET_POINTS.semi, holes: FRONT_NINE, sides: [seat(0), seat(3)] },
-      { ...base, id: `${round.id}-${group.bracket}-semi2`, stage: 'semi', label: 'Semifinal · 2 v 3', weight: BRACKET_POINTS.semi, holes: FRONT_NINE, sides: [seat(1), seat(2)] },
-    );
-    if (group.final) {
-      matches.push(
-        { ...base, id: `${round.id}-${group.bracket}-final`, stage: 'final', label: `Bracket ${group.bracket} Final · ${BRACKET_POINTS.final} pts`, weight: BRACKET_POINTS.final, holes: BACK_NINE, sides: group.final.map(seat) },
-        { ...base, id: `${round.id}-${group.bracket}-third`, stage: 'third', label: '3rd place · 1 pt', weight: BRACKET_POINTS.third, holes: BACK_NINE, sides: group.third.map(seat) },
-      );
-    }
-  });
-  return matches;
-}
-
-// Fills in a bracket round from the seeds, the A/B picks and the semis.
-function resolveBracket(config, round, scores, seeds) {
-  const picks = config.bracketPicks || {};
-  const valid = (t) => config.teams[t]?.players.includes(picks[t]);
-  const order = pickOrder(seeds);
-  round.seeds = seeds;
-  round.pickTurn = order.find((t) => !valid(t));
-  if (round.pickTurn !== undefined) {
-    round.pending = true;
-    round.needsPicks = true;
-    return;
-  }
-  const other = (t) => config.teams[t].players.find((p) => p !== picks[t]);
-  round.groups = BRACKETS.map((bracket) => ({
-    bracket,
-    teams: [...seeds],
-    players: seeds.map((t) => (bracket === 'A' ? picks[t] : other(t))),
-  }));
-  // Back 9 matchups once both semis in a bracket are final.
-  for (const group of round.groups) {
-    const semis = bracketMatches(config, { ...round, groups: [group] }).map((m) => ({ m, res: computeMatch(m, scores[round.id]) }));
-    if (!semis.every(({ res }) => res.done)) continue;
-    const winnerLoser = ({ m, res }) => {
-      // Halved semi: the higher seed (side 0) advances.
-      const w = res.leader === null ? 0 : res.leader;
-      return [m.sides[w].seed - 1, m.sides[1 - w].seed - 1];
-    };
-    const [[w1, l1], [w2, l2]] = semis.map(winnerLoser);
-    group.final = [w1, w2].sort((a, b) => a - b);
-    group.third = [l1, l2].sort((a, b) => a - b);
-  }
 }
