@@ -637,6 +637,7 @@ function skinsCard(config) {
   }
   const count = {};
   won.forEach((h) => { count[h.winner] = (count[h.winner] || 0) + 1; });
+  const pot = SKIN_STAKE * (PLAYER_IDS.length - 1);
   const rows = PLAYER_IDS.map((p) => ({ p, v: net[p], n: count[p] || 0 }))
     .sort((a, b) => b.v - a.v || playerName(a.p).localeCompare(playerName(b.p)));
   const recent = [...won].reverse().map((h) => `<div class="sk-hole">
@@ -647,14 +648,19 @@ function skinsCard(config) {
   const pays = settleUp(net);
   return `<div class="card sk-card">
     <div class="sk-sum">${won.length} won · ${decided.length - won.length} tied · ${holes.length - decided.length} to play</div>
-    ${rows.map((r) => `<div class="sk-row">
+    <p class="sk-how">Win a skin and everyone else pays you $${SKIN_STAKE} ($${pot} a skin). You pay $${SKIN_STAKE} on every skin someone else wins.
+      The number on the right is where you stand overall.</p>
+    ${rows.map((r) => {
+      const paid = r.n * pot - r.v;
+      return `<div class="sk-row">
       <span class="sk-name">${teamDot(teamOf(config, r.p))}${esc(playerName(r.p))}</span>
-      <span class="sk-n">${r.n ? `${r.n} skin${r.n === 1 ? '' : 's'}` : ''}</span>
+      <span class="sk-n">${r.n ? `${r.n} skin${r.n === 1 ? '' : 's'} · won $${r.n * pot}` : ''}${paid ? `${r.n ? ' · ' : ''}paid $${paid}` : ''}</span>
       <b class="sk-v ${r.v > 0 ? 'up' : r.v < 0 ? 'down' : ''}">${fmtMoney(r.v)}</b>
-    </div>`).join('')}
+    </div>`;
+    }).join('')}
     ${recent ? `<div class="sk-recent">${recent}</div>` : ''}
     <button class="info-btn ${open ? 'on' : ''}" data-action="info" data-id="settle">Settle up ${open ? '▴' : '▾'}</button>
-    ${open ? `<div class="sk-settle">${pays.length ? pays.map((x) => `<div class="kv"><span>${esc(playerName(x.from))} → ${esc(playerName(x.to))}</span><b>$${x.amount}</b></div>`).join('')
+    ${open ? `<div class="sk-settle"><p class="sk-how">Everything combined into the fewest payments, so nobody has to send eight $5 Venmos.</p>${pays.length ? pays.map((x) => `<div class="kv"><span>${esc(playerName(x.from))} → ${esc(playerName(x.to))}</span><b>$${x.amount}</b></div>`).join('')
       : '<p class="muted">Everyone is even.</p>'}</div>` : ''}
   </div>`;
 }

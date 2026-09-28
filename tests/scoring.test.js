@@ -121,7 +121,7 @@ test('score marks relative to par', () => {
   assert.equal(scoreMark(null, 4), '');
 });
 
-test('birdie counts use each round\'s pars, including Friday, and skip disabled rounds', () => {
+test('birdie counts use each round\'s pars, skip Friday and disabled rounds', () => {
   const c = structuredClone(cfg);
   const scores = {
     fri: { tate: { 4: 2 } }, // Indian Canyon 4 is a par 3
@@ -129,11 +129,21 @@ test('birdie counts use each round\'s pars, including Friday, and skip disabled 
     sun: { tate: { 1: 3 } },
   };
   let counts = birdieCounts(c, scores, IDS);
-  assert.equal(counts.tate.birdies, 5);
+  assert.equal(counts.tate.birdies, 4);
   assert.equal(counts.sam.birdies, 1);
   c.rounds.find((r) => r.id === 'sun').enabled = false;
   counts = birdieCounts(c, scores, IDS);
-  assert.equal(counts.tate.birdies, 4);
+  assert.equal(counts.tate.birdies, 3);
+});
+
+test('a hole only counts once everyone in the match has a score', () => {
+  const m = matchesOf()[0]; // tate & sam v garrett & jonah, front 9
+  // Tate made 3 but Sam hasn't entered hole 1 yet: nothing decided.
+  let r = computeMatch(m, { tate: holes([3]), garrett: holes([4]), jonah: holes([4]) });
+  assert.equal(r.played, 0);
+  r = computeMatch(m, { tate: holes([3]), sam: holes([5]), garrett: holes([4]), jonah: holes([4]) });
+  assert.equal(r.played, 1);
+  assert.equal(r.status, '1 UP');
 });
 
 test('Quicksands team stroke play: live on score to par, 2 points, a tie is 1 each', () => {
@@ -368,5 +378,5 @@ test('a hole in one is its own highlight and counts as a birdie', () => {
   assert.ok(ids.includes('hl-fri-sam-4-ace'));
   const counts = birdieCounts(cfg, scores, IDS);
   assert.equal(counts.tate.birdies, 1);
-  assert.equal(counts.sam.birdies, 1);
+  assert.equal(counts.sam.birdies, 0); // Friday's ace doesn't count on the Birdie Board
 });

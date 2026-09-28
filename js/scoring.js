@@ -143,8 +143,11 @@ export function computeMatch(match, roundScores) {
   for (const hole of match.holes) {
     const a = sideScore(roundScores, match.sides[0].players, hole);
     const b = sideScore(roundScores, match.sides[1].players, hole);
+    // A hole only counts once everyone in the match has a score on it, so a
+    // best ball hole can't be decided (or a match clinched) early.
+    const allIn = match.sides.every((side) => side.players.every((p) => isScore(roundScores?.[p]?.[hole])));
     let winner = null;
-    if (a !== null && b !== null && !clinched) {
+    if (allIn && !clinched) {
       played++;
       winner = a < b ? 0 : b < a ? 1 : 'halve';
       if (winner === 0) diff++;
@@ -234,12 +237,13 @@ export function scoreMark(score, par) {
   return 'double';
 }
 
-// Birdies per player across every enabled round; an eagle or better counts as a birdie.
+// Birdies per player across every enabled round, starting at Circling Raven
+// (Friday's Captain Round doesn't count); an eagle or better counts as a birdie.
 export function birdieCounts(config, scores, playerIds) {
   const counts = {};
   playerIds.forEach((p) => { counts[p] = { id: p, birdies: 0 }; });
   for (const round of config.rounds) {
-    if (!round.enabled) continue;
+    if (!round.enabled || round.format === 'stroke') continue;
     for (const [pid, holes] of Object.entries(scores[round.id] || {})) {
       if (!counts[pid]) continue;
       for (const [hole, score] of Object.entries(holes)) {
@@ -616,7 +620,7 @@ export function birdieStreak(config, roundId, playerScores) {
 export function longestBirdieRun(config, scores, playerId) {
   let best = 0;
   for (const round of config.rounds) {
-    if (!round.enabled) continue;
+    if (!round.enabled || round.format === 'stroke') continue;
     const sc = scores[round.id]?.[playerId] || {};
     let n = 0;
     for (let h = 1; h <= 18; h++) {
