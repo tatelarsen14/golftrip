@@ -2,5 +2,7 @@
 {
   "name": "golftrip",
   "compatibility_date": "2026-09-01",
-  "assets": { "directory": "." }
+  "assets": { "directory": "." },
+  // Public link at golftrip.<account>.workers.dev
+  "workers_dev": true
 }
