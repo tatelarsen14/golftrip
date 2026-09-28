@@ -1,0 +1,11 @@
+# Files Cloudflare shouldn't publish with the site.
+wrangler.jsonc
+.assetsignore
+.git
+node_modules
+tests
+README.md
+package.json
+package-lock.json
+.wrangler
+.gitignore
