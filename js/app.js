@@ -1538,75 +1538,98 @@ function namePicker() {
 
 // ---------- Match-winning banner ----------
 
-// Matches already final when this phone last looked; null until the first
-// render, so opening the app doesn't replay old results.
-let seenFinals = null;
-let seenChampion = null;
-let seenAces = null;
-let seenCaptains = null;
-let seenPicks = null;
+// Banners only show for things that just happened: never seen on this phone
+// (remembered across app restarts) and from the last 15 minutes. The first
+// time a phone opens the app, everything so far is marked seen silently.
+const SEEN_KEY = 'golftrip:seen';
+const RECENT_MS = 15 * 60 * 1000;
+let seen = (() => {
+  try {
+    const v = JSON.parse(localStorage.getItem(SEEN_KEY));
+    return Array.isArray(v) ? new Set(v) : null;
+  } catch {
+    return null;
+  }
+})();
 const celebrations = [];
 
+// When the last of these holes was scored.
+function scoredAt(roundId, players, holes) {
+  const t = store.scoreTimes?.[roundId] || {};
+  return Math.max(0, ...players.flatMap((p) => holes.map((h) => t[p]?.[h] || 0)));
+}
+
 function checkForFinishes() {
-  const finals = new Set();
-  const fresh = [];
+  const events = []; // { key, at, banner, first }
+  let lastFinal = 0;
   for (const m of buildMatches(view)) {
     const res = computeMatch(m, store.scores[m.roundId]);
     if (!res.done) continue;
-    finals.add(m.id);
-    if (seenFinals && !seenFinals.has(m.id)) fresh.push({ m, res });
+    const last = [...res.holes].reverse().find((h) => h.winner !== null)?.hole || m.holes[m.holes.length - 1];
+    const at = scoredAt(m.roundId, m.sides.flatMap((sd) => sd.players), [last]);
+    lastFinal = Math.max(lastFinal, at);
+    events.push({ key: `final:${m.id}:${res.status}:${m.sides.map((sd) => sd.players.join('+')).join('v')}`, at, banner: () => matchBanner(m, res) });
   }
-  const final = tripFinal(view, store.scores);
-  const scoringIds = enabledRounds(view).filter((r) => r.format !== 'stroke').map((r) => r.id);
-  const champ = final ? rankTeams(view, store.scores, scoringIds, 'final').ranked[0] : null;
-  const champKey = champ && !champ.unresolved ? champ.idx : null;
-  if (seenFinals) {
-    fresh.forEach(({ m, res }) => celebrations.push(matchBanner(m, res)));
-    if (champKey !== null && seenChampion !== champKey) celebrations.push(championBanner(champ));
+  if (tripFinal(view, store.scores)) {
+    const scoringIds = enabledRounds(view).filter((r) => r.format !== 'stroke').map((r) => r.id);
+    const champ = rankTeams(view, store.scores, scoringIds, 'final').ranked[0];
+    if (champ && !champ.unresolved) events.push({ key: `champ:${champ.idx}`, at: lastFinal, banner: () => championBanner(champ) });
   }
   // Aces get their own banner, the biggest one in the app.
-  const aces = new Set();
   for (const r of enabledRounds(view)) {
     for (const [pid, holes] of Object.entries(store.scores[r.id] || {})) {
       for (const [hole, v] of Object.entries(holes)) {
         if (v !== 1) continue;
-        const key = `${r.id}-${pid}-${hole}`;
-        aces.add(key);
-        if (seenAces && !seenAces.has(key)) {
-          celebrations.unshift({
-            color: '#b8860b', kicker: `${esc(r.day.split(' ')[0])} · ${esc(r.course)} · Hole ${hole}`,
+        events.push({
+          key: `ace:${r.id}-${pid}-${hole}`, at: scoredAt(r.id, [pid], [hole]), first: true,
+          banner: () => ({
+            color: '#b8860b', kicker: `${roundDay(r)} · ${esc(r.course)} · Hole ${hole}`,
             title: 'Hole in one!', score: '⛳ 1', sub: `${esc(playerName(pid))} aced the par ${parFor(view, r.id, hole)}`, big: true,
-          });
-        }
+          }),
+        });
       }
     }
   }
   // Friday: the captain reveal, then every draft pick as it happens.
-  const capKey = draft.captains ? draft.captains.join('-') : '';
-  const picks = draft.picks || [];
-  if (seenFinals) {
-    if (capKey && capKey !== seenCaptains) {
-      celebrations.push({
-        color: '#b8860b', kicker: draft.manual ? 'The Draft' : `Captain Round · ${esc(draft.cr?.round.course || '')}`,
+  const draftAt = store.config.draft?.at || 0;
+  if (draft.captains) {
+    const cr = draft.cr;
+    const at = draft.manual ? draftAt : scoredAt(cr.round.id, cr.rows.map((r) => r.id), holesOf(cr.round));
+    events.push({
+      key: `captains:${draft.captains.join('-')}`, at,
+      banner: () => ({
+        color: '#b8860b', kicker: draft.manual ? 'The Draft' : `Captain Round · ${esc(cr.round.course)}`,
         title: 'Your captains', score: '🎖️', big: true,
         sub: `<b>${esc(playerName(draft.captains[0]))}</b> & <b>${esc(playerName(draft.captains[1]))}</b><br>${esc(playerName(draft.captains[0]))} picks first`,
-      });
-    }
-    picks.slice(seenPicks?.length || 0).forEach((p, i) => {
-      const n = (seenPicks?.length || 0) + i;
+      }),
+    });
+    (draft.picks || []).forEach((p, n) => {
       const team = n % 2;
-      celebrations.push({
-        color: store.config.teams?.[team]?.color || TEAM_COLORS[team], kicker: `The Draft · Pick ${n + 1}`,
-        title: `${esc(playerName(draft.captains[team]))} picks`, score: esc(playerName(p)),
-        sub: draft.stage === 'done' && n === picks.length - 1 ? 'The teams are set!' : '',
+      events.push({
+        key: `pick:${draft.captains.join('-')}:${n}:${p}`, at: draftAt,
+        banner: () => ({
+          color: store.config.teams?.[team]?.color || TEAM_COLORS[team], kicker: `The Draft · Pick ${n + 1}`,
+          title: `${esc(playerName(draft.captains[team]))} picks`, score: esc(playerName(p)),
+          sub: draft.stage === 'done' && n === draft.picks.length - 1 ? 'The teams are set!' : '',
+        }),
       });
     });
   }
-  seenCaptains = capKey;
-  seenPicks = picks;
-  seenAces = aces;
-  seenFinals = finals;
-  seenChampion = champKey;
+
+  const now = Date.now();
+  let changed = !seen;
+  for (const e of events) {
+    if (seen?.has(e.key)) continue;
+    changed = true;
+    if (seen && e.at && now - e.at < RECENT_MS) {
+      if (e.first) celebrations.unshift(e.banner());
+      else celebrations.push(e.banner());
+    }
+  }
+  if (changed) {
+    seen = new Set([...(seen || []), ...events.map((e) => e.key)]);
+    try { localStorage.setItem(SEEN_KEY, JSON.stringify([...seen].slice(-500))); } catch {}
+  }
   if (celebrations.length && !document.querySelector('.win-banner')) showNextCelebration();
 }
 
@@ -1885,6 +1908,7 @@ app.addEventListener('click', async (e) => {
           : c.draft.captains.length >= 2 ? [pid] : [...c.draft.captains, pid];
         c.draft.captains = caps;
         c.draft.picks = [];
+        c.draft.at = Date.now();
         c.teams = [];
         c.tuePicks = { pairs: [] };
       });
@@ -1904,6 +1928,7 @@ app.addEventListener('click', async (e) => {
         const now = draftState(c, store.scores, PLAYER_IDS);
         if (now.stage !== 'drafting' || now.turn !== turn || !now.pool.includes(pid)) throw new Error('taken');
         c.draft.picks = [...now.picks, pid];
+        c.draft.at = Date.now();
         const after = draftState(c, store.scores, PLAYER_IDS);
         // Last pick: the teams are set, named after the captains until they rename them.
         if (after.stage === 'done') {
