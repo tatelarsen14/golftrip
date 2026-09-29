@@ -4,7 +4,7 @@ import {
   buildMatches, computeMatch, computeStandings, birdieCounts, parFor, scoreMark, rankTeams, resolveConfig,
   TIEBREAKERS, puttoffKey, holesOf, halvesOf, groupRoster, roundPoints, ESCALATING_BACK_POINTS, TEAMSTROKE_POINTS,
   matchStreak, birdieStreak, highlights, longestBirdieRun, longestMatchRun, roundTotals,
-  captainRound, draftState, computeSkins, settleUp,
+  captainRound, draftState, computeSkins, settleUp, tueDraftState,
 } from './scoring.js';
 import { SCOUTING, HIGHLIGHTS, DRAFT_THEME } from './draftkit.js';
 
@@ -19,7 +19,6 @@ let store;
 let view; // store.config with each round's matchups filled in (or marked pending)
 let draft; // Friday's captains and the draft, from draftState()
 let pickedSlot = null; // Setup: first player tapped in a swap
-let tueSel = { pairs: [], pick: [null, null] }; // Tuesday matchups being set on this phone
 const drafts = {}; // unsent text in the composer and comment boxes, by field
 let pendingMedia = []; // photos/videos picked for the next post: { file, url, type }
 let posting = null; // { done, total, frac } while a post uploads
@@ -311,8 +310,9 @@ function formatInfo(config) {
     <p>Partners rotate so you play with each teammate once and face three different opponents. 6 points a day.</p>
     <p><b>Mon AM · Quicksands.</b> Team stroke play over 14 par 3s. All four scores on each team count; the lower team total wins
       ${TEAMSTROKE_POINTS} points (tie = 1 each).</p>
-    <p><b>Tuesday · Escalating singles.</b> The captain of the team in first after Monday sets all four matchups. Front 9 singles
-      are worth 1, then opponents swap for the back 9, worth ${ESCALATING_BACK_POINTS} (tie = 1 each). 12 points.</p>
+    <p><b>Tuesday · Escalating singles.</b> Monday night the captains set the back 9 matchups (worth ${ESCALATING_BACK_POINTS} each, tie = 1 each)
+      in turn: one puts a player out, the other picks who plays him. The trailing team puts out first, so the team in first answers twice;
+      match 4 is whoever's left. Front 9 singles are worth 1: you play the other guy in your group. 12 points.</p>
     <p><b>Points:</b> Win = 1 · Tie = ½ · Loss = 0. ${total} points in all, so ${fmtHalf(total / 2 + 0.5)} wins the Cup.
       Level at the end goes to the tiebreakers: there's no shared Cup.</p>
     <p><b>Max score:</b> triple bogey (par + 3) on every hole. No handicaps.</p>
@@ -590,48 +590,34 @@ function draftCard(config) {
   </div>`;
 }
 
-// ---------- Tuesday: the leader sets the matchups ----------
+// ---------- Tuesday: the matchup draft ----------
 
+// Monday night on the Leaderboard: who's picking and the matchups so far.
+// The picking itself happens in the draft room.
 function tuePicksCard(config, round) {
   const L = round.leader;
-  const cap = captainOf(config, L);
-  const can = isAdmin() || ui.me === cap;
+  const td = store.config.tueDraft || {};
+  const st = tueDraftState(store.config, L);
   const name = (p) => esc(playerName(p));
-  const pairs = can ? tueSel.pairs : [];
-  const slot = (i) => {
-    const p = pairs[i];
-    const label = `${esc(round.tees?.[i >> 1] || `Group ${(i >> 1) + 1}`)} · Match ${(i % 2) + 1}`;
-    return `<div class="tp-slot ${can && i === pairs.length ? 'on' : ''}"><span class="tp-label">${label}</span>
-      <span>${p ? `${teamDot(0)}${name(p[0])} <span class="vs">v</span> ${teamDot(1)}${name(p[1])}` : '<span class="muted">–</span>'}</span></div>`;
-  };
-  const intro = `<p class="muted">${esc(teamName(config, L))} finished first, so captain <b>${name(cap)}</b> sets all four singles matchups.
-    Front 9 is worth 1 a match; then opponents swap within each group for the back 9, worth ${ESCALATING_BACK_POINTS}.</p>`;
-  if (!can) {
-    return `<div class="card tp-card"><div class="cr-head"><span>👑 Tuesday matchups</span><span>${name(cap)} is picking</span></div>
-      ${intro}<p class="muted">They'll show up here the moment they're locked in.</p></div>`;
-  }
-  let body = '';
-  if (pairs.length < 4) {
-    const used = new Set(pairs.flat());
-    body = [0, 1].map((t) => `<div class="tp-pick">
-      <div class="tp-team">${teamDot(t)}${esc(teamName(config, t))}</div>
-      <div class="dr-pool">${config.teams[t].players.filter((p) => !used.has(p)).map((p) => `
-        <button class="${tueSel.pick[t] === p ? 'on' : ''}" data-action="tue-sel" data-team="${t}" data-player="${p}">${name(p)}</button>`).join('')}</div>
-    </div>`).join('');
-    body += '<p class="muted">Tap one player from each team to make a match.</p>';
-  } else {
-    body = `<div class="tp-back"><b>Back 9 (${ESCALATING_BACK_POINTS} pts each):</b> ${[0, 1].map((g) => {
-      const [x, y] = [pairs[g * 2], pairs[g * 2 + 1]];
-      return `${name(x[0])} v ${name(y[1])}, ${name(y[0])} v ${name(x[1])}`;
-    }).join(' · ')}</div>
-      <button class="btn" data-action="tue-lock">Lock in matchups</button>`;
-  }
+  const rows = [0, 1, 2, 3].map((m) => {
+    const b = st.back[m];
+    const label = `${esc(round.tees?.[m >> 1] || `Group ${(m >> 1) + 1}`)} · Match ${m + 1}`;
+    return `<div class="tp-slot"><span class="tp-label">${label}</span>
+      <span>${b ? `${teamDot(0)}${name(b[0])} <span class="vs">v</span> ${teamDot(1)}${name(b[1])}` : '<span class="muted">–</span>'}</span></div>`;
+  }).join('');
+  const room = audioUnlocked ? '<div class="dr-room on">🎧 You\'re in the draft room</div>'
+    : '<button class="btn dr-room" data-action="enter-room">🎧 Enter the draft room <small>turns on the music</small></button>';
+  const action = !td.started
+    ? `${room}${isAdmin() ? '<button class="btn dr-start" data-action="tue-start">Start the matchups</button>'
+      : '<p class="muted dr-wait">Tate starts it when everyone\'s together.</p>'}`
+    : `${audioUnlocked ? '' : room}<button class="btn dr-start" data-action="draft-room-open">🎬 Open the draft room</button>`;
   return `<div class="card tp-card">
-    <div class="cr-head"><span>👑 Tuesday matchups</span><span>${pairs.length} of 4 set</span></div>
-    ${intro}
-    ${[0, 1, 2, 3].map(slot).join('')}
-    ${body}
-    ${pairs.length ? '<button class="link" data-action="tue-undo">Undo</button>' : ''}
+    <div class="cr-head"><span>👑 Tuesday matchups</span><span>${td.started ? 'Live' : 'Monday night'}</span></div>
+    <p class="muted">${esc(teamName(config, L))} finished first. The captains set Tuesday's <b>back 9</b> matchups (${ESCALATING_BACK_POINTS} pts each):
+      ${name(captainOf(config, 1 - L))} puts a player out, ${name(captainOf(config, L))} picks who plays him, then they swap. The leader answers twice;
+      match 4 is whoever's left. Front 9 matchups follow (you play the other guy in your group).</p>
+    ${rows}
+    ${action}
   </div>`;
 }
 
@@ -1162,7 +1148,7 @@ function renderSetup() {
         }).join('');
       } else if (r.format === 'escalating') {
         detail = `<div class="singles-line">${tuePairs.length === 4 ? `Matchups set: <b>${tuePairs.map(([x, y]) => `${name(x)} v ${name(y)}`).join(', ')}</b>
-          <button class="link" data-action="tue-reset">Reset</button>` : resolved.needsPicks ? `Waiting on ${esc(teamName(config, resolved.leader))} to set the matchups.` : 'Set by the leader after Monday.'}</div>`;
+          <button class="link" data-action="tue-reset">Reset</button>` : resolved.needsPicks ? (config.tueDraft?.started ? 'Matchup draft is live.' : 'Ready: start the matchups from the Leaderboard.') : 'Set by the captains Monday night.'}</div>`;
       } else if (r.format === 'teamstroke') {
         detail = `<div class="singles-line">Team stroke play, ${TEAMSTROKE_POINTS} pts. Groups are Gamble Sands' groups.</div>`;
       } else if (r.format === 'stroke') {
@@ -1637,6 +1623,7 @@ function mountReveal(el, item) {
       <div class="rv-kicker">The Buckle Up Draft</div>
       <div class="rv-l1 show">${item.title}</div>
       <div class="rv-l2 show">${item.sub || ''}</div>
+      ${item.body || ''}
     </div>`;
     return [];
   }
@@ -1659,7 +1646,7 @@ function mountReveal(el, item) {
         <div class="rv-selects">${item.selects || ''}</div>
         <div class="rv-name">${esc(playerName(item.pid))}</div>
         <div class="rv-team"><i></i>${item.sub || ''}</div>
-        ${scoutCard(item.pid)}
+        ${item.card ?? scoutCard(item.pid)}
         ${item.roster ? `<div class="rv-roster">${item.roster}</div>` : ''}
       </div>
     </div>
@@ -1748,11 +1735,123 @@ function closeStage() {
   pickSheetOpen = false;
 }
 
-// Keeps the room in step with the draft: called on every render and once a
-// second while the Captains Reveal is running.
+// ---------- Tuesday matchups in the draft room ----------
+
+const tueRound = () => view.rounds.find((r) => r.format === 'escalating');
+const teeFor = (m) => esc(tueRound()?.tees?.[m >> 1] || `Group ${(m >> 1) + 1}`);
+
+// A player's Sat-Mon record, for the matchup cards.
+function recordOf(pid) {
+  const standings = computeStandings(view, store.scores);
+  const r = standings.players[pid] || { points: 0, w: 0, l: 0, h: 0 };
+  return { pts: fmtHalf(r.points), wlh: `${r.w}-${r.l}-${r.h}` };
+}
+
+function recordCard(pid) {
+  const r = recordOf(pid);
+  const birdies = birdieCounts(view, store.scores, PLAYER_IDS)[pid]?.birdies || 0;
+  return `<div class="rv-card">
+    <div class="rv-card-head"><span>Sat – Mon</span><span>${esc(teamName(view, teamOf(view, pid)))}</span></div>
+    <div class="rv-stats three">
+      <div><b>${r.pts}</b><small>Points</small></div>
+      <div><b>${r.wlh}</b><small>W-L-H</small></div>
+      <div><b class="red">${birdies}</b><small>Birdies</small></div>
+    </div>
+    ${SCOUTING[pid] ? `<div class="rv-report"><span>The book on ${esc(playerName(pid))}</span>${esc(SCOUTING[pid])}</div>` : ''}
+  </div>`;
+}
+
+// Head to head for one back 9 match, plus the group's front 9 once it's set.
+function matchupCard(m, st) {
+  const [x, y] = st.back[m];
+  const side = (pid, t) => {
+    const r = recordOf(pid);
+    return `<div class="rv-h2h-side" style="--t:${teamColor(t)}"><b>${esc(playerName(pid))}</b><small>${r.pts} pts · ${r.wlh}</small></div>`;
+  };
+  const g = m >> 1;
+  const other = st.back[g * 2 + (m % 2 ? 0 : 1)];
+  const front = other ? (m % 2 ? [[other[0], y], [x, other[1]]] : [[x, other[1]], [other[0], y]]) : null;
+  return `<div class="rv-card">
+    <div class="rv-card-head"><span>Match ${m + 1} · Back 9</span><span>${ESCALATING_BACK_POINTS} pts · ${teeFor(m)}</span></div>
+    <div class="rv-h2h">${side(x, 0)}<span class="rv-vs">vs</span>${side(y, 1)}</div>
+    <div class="rv-report"><span>Front 9 (1 pt)</span>${front ? front.map(([a, b2]) => `${esc(playerName(a))} v ${esc(playerName(b2))}`).join(' · ')
+      : 'Set once the other match in this group is picked.'}</div>
+  </div>`;
+}
+
+// What the room shows during the matchup draft, or null when it isn't on.
+function tueScene() {
+  const td = store.config.tueDraft || {};
+  const tue = tueRound();
+  if (!td.started || tue?.leader == null) return null;
+  const st = tueDraftState(store.config, tue.leader);
+  const n = st.moves.length;
+  const at = (i) => td.times?.[i] || td.startedAt;
+  if (n === 0) return { mode: 'tue', key: `tm:${td.startedAt}:0`, kind: 'start', st, startAt: td.startedAt };
+  if (st.done && Date.now() - at(n - 1) >= 12000) return { mode: 'tue', key: `tm:${td.startedAt}:done`, kind: 'done', st, startAt: at(n - 1) + 12000 };
+  return { mode: 'tue', key: `tm:${td.startedAt}:${n}`, kind: n % 2 ? 'out' : 'answer', st, n, startAt: at(n - 1), tick: st.done };
+}
+
+function tueItem(sc) {
+  const { st } = sc;
+  const tn = (t) => esc(teamName(view, t));
+  if (sc.kind === 'start') {
+    return { title: 'Tuesday matchups', color: teamColor(st.trail),
+      sub: `${tn(st.leader)} finished first · ${esc(playerName(captainOf(view, st.trail)))} puts out first` };
+  }
+  if (sc.kind === 'done') {
+    const list = st.back.map((b, m) => `<div class="rv-set-row"><span>${teeFor(m)} · Match ${m + 1}</span>
+      <b>${esc(playerName(b[0]))} v ${esc(playerName(b[1]))}</b></div>`).join('');
+    return { title: 'Tuesday is set', sub: `Back 9 matchups · ${ESCALATING_BACK_POINTS} pts each`, color: teamColor(st.leader),
+      body: `<div class="rv-set">${list}<p>Front 9 (1 pt): you play the other guy in your group.</p></div>` };
+  }
+  const m = Math.floor((sc.n - 1) / 2);
+  const pid = st.moves[sc.n - 1];
+  if (sc.kind === 'out') {
+    const t = st.order[m][0];
+    return { pid, color: teamColor(t), kicker: `Tuesday matchups · Match ${m + 1}`,
+      line1: `Match ${m + 1}<br>Back 9 · ${ESCALATING_BACK_POINTS} pts`, line2: `<b>${tn(t)}</b> puts out`,
+      pill: `Match ${m + 1} · ${teeFor(m)}`, selects: `${tn(t)} puts out`, sub: `Match ${m + 1} · Back 9 · ${ESCALATING_BACK_POINTS} pts`,
+      card: recordCard(pid) };
+  }
+  const t = st.order[m][1];
+  const out = st.moves[sc.n - 2];
+  return { pid, color: teamColor(t), kicker: `Tuesday matchups · Match ${m + 1}`,
+    line1: `Who's got<br>${esc(playerName(out))}?`, line2: `<b>${tn(t)}</b> answers with`,
+    pill: `Match ${m + 1} · ${teeFor(m)}`, selects: `vs ${esc(playerName(out))}`, sub: `${tn(t)} · Match ${m + 1}`,
+    card: matchupCard(m, st) };
+}
+
+// A captain's move in the matchup draft, checked against the latest saved
+// state so two phones can't both move.
+function makeTueMove(pid) {
+  const tue = tueRound();
+  if (tue?.leader == null) return;
+  const st = tueDraftState(store.config, tue.leader);
+  const turn = st.turn;
+  if (!turn || !st.pool[turn.team].includes(pid)) return;
+  if (!isAdmin() && ui.me !== captainOf(view, turn.team)) return;
+  const msg = turn.role === 'out' ? `Put out ${playerName(pid)} for match ${turn.match + 1}?` : `${playerName(pid)} plays ${playerName(turn.out)}?`;
+  if (!confirm(msg)) return;
+  pickSheetOpen = false;
+  store.updateConfig((c) => {
+    const now = tueDraftState(c, tue.leader);
+    if (!c.tueDraft.started || now.moves.length !== st.moves.length || !now.pool[turn.team].includes(pid)) throw new Error('taken');
+    c.tueDraft.moves = [...now.moves, pid];
+    c.tueDraft.times = [...(c.tueDraft.times || []).slice(0, now.moves.length), Date.now()];
+    const after = tueDraftState(c, tue.leader);
+    if (after.done) c.tuePicks = { pairs: after.pairs };
+  }).catch((err) => {
+    if (err.message === 'taken') alert('That just changed on another phone. Take another look.');
+    else showError(err);
+  });
+}
+
+// Keeps the room in step with the draft (or Monday's matchups): called on
+// every render and once a second while a timed sequence is running.
 function syncStage() {
-  const sc = draftScene();
-  const done = draft.stage === 'done';
+  const sc = tueScene() || draftScene();
+  const done = sc?.mode === 'tue' ? sc.kind === 'done' : draft.stage === 'done';
   const stale = sc && done && Date.now() - sc.startAt > 30 * 60 * 1000;
   if (!sc || stale || ui.draftHidden === sc.key) {
     closeStage();
@@ -1760,8 +1859,9 @@ function syncStage() {
     stageTick = null;
     return;
   }
-  if (sc.kind === 'captains' && sc.step < 2 && !stageTick) stageTick = setInterval(syncStage, 1000);
-  if (sc.kind !== 'captains' || sc.step >= 2) { clearInterval(stageTick); stageTick = null; }
+  const ticking = sc.tick || (sc.kind === 'captains' && sc.step < 2);
+  if (ticking && !stageTick) stageTick = setInterval(syncStage, 1000);
+  if (!ticking && stageTick) { clearInterval(stageTick); stageTick = null; }
 
   if (!stageEl) {
     stageEl = document.createElement('div');
@@ -1777,41 +1877,64 @@ function syncStage() {
     // anyone joining late lands on the finished reveal.
     const fresh = Date.now() - sc.startAt < 6000;
     let item;
-    if (sc.kind === 'captains') item = captainReveals()[sc.step];
+    if (sc.mode === 'tue') item = tueItem(sc);
+    else if (sc.kind === 'captains') item = captainReveals()[sc.step];
     else item = pickReveal(sc.n);
     if (!item.title) item = { ...item, skipIntro: !fresh };
-    const scene = stageEl.querySelector('.rv-scene');
-    stageTimers = mountReveal(scene, item);
+    stageTimers = mountReveal(stageEl.querySelector('.rv-scene'), item);
     stageEl.style.setProperty('--c', item.color || '#16402b');
-    if (fresh && (sc.kind === 'pick' || sc.step === 0)) playTheme();
+    const opener = sc.mode === 'tue' ? sc.kind !== 'done' : sc.kind === 'pick' || sc.step === 0;
+    if (fresh && opener) playTheme();
     pickSheetOpen = false;
   }
   renderStageBar(sc);
 }
 
+// The bar along the bottom of the room: whose turn it is, and a button for
+// the captain who's up (Tate can act for either).
 function renderStageBar(sc) {
   const bar = stageEl.querySelector('.rv-bar');
   const sheet = stageEl.querySelector('.rv-sheet');
   const hide = '<button class="rv-link" data-stage="hide">Board</button>';
+  const act = (team, mine, label) => (ui.me === captainOf(store.config, team)
+    ? `<button class="rv-btn" data-stage="pick">${mine}</button>`
+    : isAdmin() ? `<button class="rv-link" data-stage="pick">${label}</button>` : hide);
   let html;
-  if (draft.stage === 'done') {
+  let sheetTitle = '';
+  let pool = [];
+  if (sc.mode === 'tue') {
+    const turn = sc.st.turn;
+    if (!turn) {
+      html = `<span>✅ Tuesday is set</span><button class="rv-btn" data-stage="hide">See the board</button>`;
+    } else {
+      const cap = captainOf(store.config, turn.team);
+      const who = ui.me === cap ? 'You' : esc(playerName(cap));
+      const doing = turn.role === 'out' ? 'put out a player' : `pick who plays ${esc(playerName(turn.out))}`;
+      html = `<span>Match ${turn.match + 1} · <b>${who}</b> ${ui.me === cap ? '' : 'to '}${doing}</span>
+        ${act(turn.team, turn.role === 'out' ? 'Put out a player →' : 'Pick his opponent →', `Pick for ${esc(playerName(cap))}`)}`;
+      sheetTitle = turn.role === 'out' ? `Match ${turn.match + 1}: who does ${esc(teamName(store.config, turn.team))} put out?`
+        : `Who plays ${esc(playerName(turn.out))}?`;
+      pool = sc.st.pool[turn.team];
+    }
+  } else if (draft.stage === 'done') {
     html = `<span>🎉 Draft complete</span><button class="rv-btn" data-stage="hide">See the teams</button>`;
   } else if (sc.kind === 'captains' && sc.step < 2) {
     html = `<span>🎬 Captains Reveal</span>${hide}`;
   } else {
     const on = draft.captains[draft.turn];
-    const canPick = isAdmin() || ui.me === on;
     const n = draft.picks.length + 1;
     html = `<span>Pick ${n} of ${PLAYER_IDS.length - 2} · <b>${esc(ui.me === on ? 'You\'re' : `${playerName(on)} is`)}</b> on the clock</span>
       ${ui.me === on ? '<button class="rv-btn" data-stage="pick">Make your pick →</button>'
-        : canPick ? `<button class="rv-link" data-stage="pick">Pick for ${esc(playerName(on))}</button>` : hide}`;
+        : isAdmin() ? `<button class="rv-link" data-stage="pick">Pick for ${esc(playerName(on))}</button>` : hide}`;
+    sheetTitle = `Pick ${n} for ${esc(draftTeamName(draft.turn))}`;
+    pool = draft.pool || [];
   }
   bar.innerHTML = html;
-  if (pickSheetOpen && draft.stage === 'drafting') {
+  if (pickSheetOpen && pool.length) {
     sheet.hidden = false;
     sheet.innerHTML = `<div class="rv-sheet-card">
-      <div class="rv-sheet-title">Pick ${draft.picks.length + 1} for ${esc(draftTeamName(draft.turn))}</div>
-      <div class="rv-pool">${draft.pool.map((p) => `<button data-stage="choose" data-player="${p}">${esc(playerName(p))}</button>`).join('')}</div>
+      <div class="rv-sheet-title">${sheetTitle}</div>
+      <div class="rv-pool">${pool.map((p) => `<button data-stage="choose" data-player="${p}">${esc(playerName(p))}</button>`).join('')}</div>
       <button class="rv-link" data-stage="cancel">Cancel</button>
     </div>`;
   } else {
@@ -1823,6 +1946,7 @@ function onStageClick(e) {
   const t = e.target.closest('[data-stage]');
   if (!t) return;
   const what = t.dataset.stage;
+  const sc = tueScene() || draftScene();
   if (what === 'hide') {
     ui.draftHidden = stageKey;
     saveUI();
@@ -1830,12 +1954,13 @@ function onStageClick(e) {
     render();
   } else if (what === 'pick') {
     pickSheetOpen = true;
-    renderStageBar(draftScene());
+    renderStageBar(sc);
   } else if (what === 'cancel') {
     pickSheetOpen = false;
-    renderStageBar(draftScene());
+    renderStageBar(sc);
   } else if (what === 'choose') {
-    makePick(t.dataset.player);
+    if (sc?.mode === 'tue') makeTueMove(t.dataset.player);
+    else makePick(t.dataset.player);
   }
 }
 
@@ -2333,32 +2458,23 @@ app.addEventListener('click', async (e) => {
     case 'cap-puttoff-reset':
       saveSetup((c) => { ((c.puttoffs ||= {}).captain ||= {})[el.dataset.key] = []; });
       return;
-    case 'tue-sel': {
-      const t = Number(el.dataset.team);
-      tueSel.pick[t] = tueSel.pick[t] === el.dataset.player ? null : el.dataset.player;
-      if (tueSel.pick[0] && tueSel.pick[1] && tueSel.pairs.length < 4) {
-        tueSel.pairs.push([tueSel.pick[0], tueSel.pick[1]]);
-        tueSel.pick = [null, null];
-      }
-      break;
-    }
-    case 'tue-undo':
-      if (tueSel.pick[0] || tueSel.pick[1]) tueSel.pick = [null, null];
-      else tueSel.pairs.pop();
-      break;
-    case 'tue-lock': {
+    case 'tue-start': {
       const r = enabledRounds(view).find((x) => x.needsPicks);
-      if (!r || tueSel.pairs.length !== 4) return;
-      if (!isAdmin() && ui.me !== captainOf(view, r.leader)) return;
-      if (!confirm("Lock in Tuesday's matchups? Everyone sees them right away.")) return;
-      const pairs = tueSel.pairs.map((p) => [...p]);
-      tueSel = { pairs: [], pick: [null, null] };
-      saveSetup((c) => { c.tuePicks = { pairs }; });
+      if (!isAdmin() || !r) return;
+      if (!confirm("Start Tuesday's matchups? Every phone opens the draft room.")) return;
+      if (!audioUnlocked) unlockAudio();
+      store.updateConfig((c) => {
+        c.tueDraft = { started: true, startedAt: Date.now(), moves: [], times: [] };
+        c.tuePicks = { pairs: [] };
+      }).catch(showError);
       return;
     }
     case 'tue-reset':
-      if (!confirm("Clear Tuesday's matchups so the leader can set them again?")) return;
-      saveSetup((c) => { c.tuePicks = { pairs: [] }; });
+      if (!confirm("Clear Tuesday's matchups so the captains can set them again?")) return;
+      saveSetup((c) => {
+        c.tuePicks = { pairs: [] };
+        c.tueDraft = { started: false, startedAt: 0, moves: [], times: [] };
+      });
       return;
     case 'puttoff': {
       if (!isPlayer()) return;

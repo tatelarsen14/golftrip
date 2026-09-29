@@ -716,3 +716,48 @@ export function roundTotals(config, scores, playerId) {
     return { roundId: r.id, day: r.day, course: r.course, gross: holes.reduce((a, b) => a + b, 0), holes: holes.length, par };
   });
 }
+
+// ---------- Tuesday: the matchup draft ----------
+//
+// Monday night the captains set Tuesday's back 9 matchups (worth 2 each) in
+// turn: one puts a player out, the other picks who plays him. The trailing
+// team puts out first, so the leader answers twice (matches 1 and 3); match 4
+// is whoever's left. Matches 1-2 are the first group, 3-4 the second; the
+// front 9 matchups follow (you play the other opponent in your group).
+// `moves` is every player named, in order: out, answer, out, answer, ...
+
+export function tueDraftState(config, leader) {
+  const teams = config.teams || [];
+  const trail = 1 - leader;
+  const order = [[trail, leader], [leader, trail], [trail, leader]]; // [puts out, answers] per match
+  const used = new Set();
+  const moves = [];
+  for (const pid of config.tueDraft?.moves || []) {
+    const i = moves.length;
+    if (i >= 6) break;
+    const team = order[Math.floor(i / 2)][i % 2];
+    if (!teams[team]?.players.includes(pid) || used.has(pid)) break;
+    used.add(pid);
+    moves.push(pid);
+  }
+  const byTeam = (a, b, ta) => (ta === 0 ? [a, b] : [b, a]); // [team 0 player, team 1 player]
+  const back = [];
+  for (let m = 0; m * 2 + 1 < moves.length; m++) back.push(byTeam(moves[m * 2], moves[m * 2 + 1], order[m][0]));
+  const pool = [0, 1].map((t) => (teams[t]?.players || []).filter((p) => !used.has(p)));
+  let turn = null;
+  if (moves.length < 6) {
+    const m = Math.floor(moves.length / 2);
+    const role = moves.length % 2 ? 'answer' : 'out';
+    turn = { match: m, role, team: order[m][role === 'out' ? 0 : 1], out: role === 'answer' ? moves[moves.length - 1] : null };
+  } else if (pool[0].length === 1 && pool[1].length === 1) {
+    back.push([pool[0][0], pool[1][0]]);
+  }
+  const done = back.length === 4;
+  // Front 9 pairs as resolveConfig expects them: [a, b] per match, where the
+  // back 9 swaps opponents within each group.
+  const pairs = done ? [0, 1].flatMap((g) => {
+    const [x, y] = [back[g * 2], back[g * 2 + 1]];
+    return [[x[0], y[1]], [y[0], x[1]]];
+  }) : null;
+  return { leader, trail, order, moves, back, pool, turn, done, pairs };
+}

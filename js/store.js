@@ -29,6 +29,10 @@ function withDefaults(saved) {
     at: saved.draft?.at || 0, started: !!saved.draft?.started, startedAt: saved.draft?.startedAt || 0,
   };
   config.tuePicks = { pairs: (saved.tuePicks?.pairs || []).map((x) => (typeof x === 'string' ? x.split('|') : x)) };
+  config.tueDraft = {
+    started: !!saved.tueDraft?.started, startedAt: saved.tueDraft?.startedAt || 0,
+    moves: saved.tueDraft?.moves || [], times: saved.tueDraft?.times || [],
+  };
   config.puttoffs = saved.puttoffs || {};
   for (const r of saved.rounds || []) {
     const round = config.rounds.find((d) => d.id === r.id);
@@ -40,7 +44,7 @@ function withDefaults(saved) {
 
 // Only the setup is saved; pars and formats are fixed. Arrays and full
 // objects every time, so a reset overwrites (Firestore merges nested maps).
-const setupFields = ({ teams = [], draft, tuePicks, rounds, puttoffs = {} }) => JSON.parse(JSON.stringify({
+const setupFields = ({ teams = [], draft, tuePicks, tueDraft, rounds, puttoffs = {} }) => JSON.parse(JSON.stringify({
   v: DEFAULT_CONFIG.v,
   teams,
   draft: {
@@ -49,6 +53,10 @@ const setupFields = ({ teams = [], draft, tuePicks, rounds, puttoffs = {} }) => 
   },
   // Firestore can't hold arrays inside arrays, so each matchup is "a|b".
   tuePicks: { pairs: (tuePicks?.pairs || []).map((x) => (Array.isArray(x) ? x.join('|') : x)) },
+  tueDraft: {
+    started: !!tueDraft?.started, startedAt: tueDraft?.startedAt || 0,
+    moves: tueDraft?.moves || [], times: tueDraft?.times || [],
+  },
   rounds: rounds.map((r) => Object.fromEntries(SAVED_ROUND_FIELDS.map((f) => [f, r[f] ?? null]))),
   puttoffs,
 }));

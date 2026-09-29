@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildMatches, computeMatch, computeStandings, sideScore, scoreMark, birdieCounts, rankTeams, resolveConfig,
   matchStreak, birdieStreak, highlights, longestBirdieRun, longestMatchRun,
-  captainRound, draftState, computeSkins, settleUp, roundPoints,
+  captainRound, draftState, computeSkins, settleUp, roundPoints, tueDraftState,
 } from '../js/scoring.js';
 import { DEFAULT_CONFIG, PLAYERS, ROTATION } from '../js/data.js';
 
@@ -379,4 +379,26 @@ test('a hole in one is its own highlight and counts as a birdie', () => {
   const counts = birdieCounts(cfg, scores, IDS);
   assert.equal(counts.tate.birdies, 1);
   assert.equal(counts.sam.birdies, 0); // Friday's ace doesn't count on the Birdie Board
+});
+
+test('Tuesday matchup draft: trailing team puts out first, leader answers twice, match 4 fills in', () => {
+  // Team Tate (0) leads; Team Garrett (1) trails.
+  const c = { ...cfg, tueDraft: { moves: ['garrett', 'tate', 'sam', 'jonah', 'brody', 'josh'] } };
+  let d = tueDraftState({ ...cfg, tueDraft: { moves: [] } }, 0);
+  assert.deepEqual(d.turn, { match: 0, role: 'out', team: 1, out: null });
+  d = tueDraftState({ ...cfg, tueDraft: { moves: ['garrett'] } }, 0);
+  assert.deepEqual(d.turn, { match: 0, role: 'answer', team: 0, out: 'garrett' });
+  // A player from the wrong team (or used twice) stops the sequence there.
+  assert.equal(tueDraftState({ ...cfg, tueDraft: { moves: ['tate'] } }, 0).moves.length, 0);
+  d = tueDraftState(c, 0);
+  assert.equal(d.done, true);
+  assert.deepEqual(d.back, [['tate', 'garrett'], ['sam', 'jonah'], ['josh', 'brody'], ['jp', 'skyler']]);
+  // Group 1: back 9 Tate v Garrett and Sam v Jonah, so the front 9 is Tate v Jonah and Sam v Garrett.
+  assert.deepEqual(d.pairs, [['tate', 'jonah'], ['sam', 'garrett'], ['josh', 'skyler'], ['jp', 'brody']]);
+  const scores = {};
+  const v = resolveConfig({ ...cfg, tuePicks: { pairs: d.pairs } }, scores);
+  const tue = v.rounds.find((r) => r.id === 'tue');
+  const backMatches = buildMatches({ ...v, rounds: [{ ...tue, pending: false, groups: [0, 1].map((gi) => ({ a: [d.pairs[gi * 2][0], d.pairs[gi * 2 + 1][0]], b: [d.pairs[gi * 2][1], d.pairs[gi * 2 + 1][1]] })) }] })
+    .filter((m) => m.holes[0] === 10).map((m) => m.sides.map((s) => s.players[0]));
+  assert.deepEqual(backMatches, d.back);
 });

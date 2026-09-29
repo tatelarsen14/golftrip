@@ -43,7 +43,8 @@ export const DEFAULT_CONFIG = {
   teams: [], // set by the draft: [{ name, color, players: [captain, pick, pick, pick] }]
   // captains: set by hand to override Friday's scores; picks stay locked until Tate starts the draft.
   draft: { captains: [], picks: [], times: [], at: 0, started: false, startedAt: 0 },
-  tuePicks: { pairs: [] }, // Tuesday matchups: [[team 0 player, team 1 player] x 4]
+  tuePicks: { pairs: [] }, // Tuesday front 9 matchups: [[team 0 player, team 1 player] x 4]
+  tueDraft: { started: false, startedAt: 0, moves: [], times: [] }, // Monday night matchup draft (see scoring.js)
   puttoffs: {},
   rounds: [
     {
