@@ -9,7 +9,7 @@ export const SCOUTING = {
   josh: 'Currently battling a shoulder injury. Holds the record for the Crown Burger Mile. The kid is TUFF. Highest probability for most F-bombs this weekend.',
   sam: 'Man knows how to put in the work at the range. Miss is the low left, but could also hit a 300-yard bomb. Best ball partner? Elite.',
   skyler: 'Mystery pick 👀 2 handicap on GHIN. And a sleeper?',
-  jp: 'Wipes the floor at the Davis Golf Course men\'s league. Wants all his money back in skins. Hits a butter fade with the driver.',
+  jp: 'Wipes the floor in Men\'s league at Davis. Wants all his money back in skins. Hits a butter fade with the driver.',
 };
 
 // Where the subject sits in each clip, so a phone-shaped crop keeps him in frame.
