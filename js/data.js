@@ -41,7 +41,8 @@ export const ROTATION = {
 export const DEFAULT_CONFIG = {
   v: 2,
   teams: [], // set by the draft: [{ name, color, players: [captain, pick, pick, pick] }]
-  draft: { captains: [], picks: [] }, // captains: set by hand to override Friday's scores
+  // captains: set by hand to override Friday's scores; picks stay locked until Tate starts the draft.
+  draft: { captains: [], picks: [], times: [], at: 0, started: false, startedAt: 0 },
   tuePicks: { pairs: [] }, // Tuesday matchups: [[team 0 player, team 1 player] x 4]
   puttoffs: {},
   rounds: [

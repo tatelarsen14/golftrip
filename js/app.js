@@ -6,6 +6,7 @@ import {
   matchStreak, birdieStreak, highlights, longestBirdieRun, longestMatchRun, roundTotals,
   captainRound, draftState, computeSkins, settleUp,
 } from './scoring.js';
+import { SCOUTING, HIGHLIGHTS, DRAFT_THEME } from './draftkit.js';
 
 const UI_KEY = 'golftrip:ui';
 // Setup only shows on phones where the organizer picked his own name.
@@ -541,22 +542,31 @@ function draftCard(config) {
   const total = PLAYER_IDS.length - 2;
   const color = (i) => (config.teams?.[i]?.color) || TEAM_COLORS[i];
   const canPick = isAdmin() || ui.me === d.captains[d.turn];
+  const started = !!store.config.draft?.started;
+  const replay = (p) => `<button class="dr-replay" data-action="replay-reveal" data-player="${p}">${esc(playerName(p))} ▶</button>`;
   const cols = [0, 1].map((i) => {
     const slots = Array.from({ length: total / 2 }, (_, k) => {
       const p = d.rosters[i][k + 1];
-      return `<li class="${p ? '' : 'open'}">${p ? esc(playerName(p)) : `Pick ${k * 2 + i + 1}`}</li>`;
+      return `<li class="${p ? '' : 'open'}">${p ? replay(p) : `Pick ${k * 2 + i + 1}`}</li>`;
     }).join('');
     const name = d.stage === 'done' ? esc(teamName(config, i)) : `Team ${esc(playerName(d.captains[i]))}`;
     return `<div class="dr-team ${d.turn === i ? 'turn' : ''}" style="--c:${color(i)}">
       <div class="dr-name">${name}</div>
-      <div class="dr-cap">${esc(playerName(d.captains[i]))} <small>Captain</small></div>
+      <div class="dr-cap">${started ? replay(d.captains[i]) : esc(playerName(d.captains[i]))} <small>Captain</small></div>
       <ol>${slots}</ol>
     </div>`;
   }).join('');
   let action = '';
-  if (d.stage === 'drafting') {
+  const room = audioUnlocked ? '<div class="dr-room on">🎧 You\'re in the draft room</div>'
+    : '<button class="btn dr-room" data-action="enter-room">🎧 Enter the draft room <small>turns on the music</small></button>';
+  if (d.stage === 'drafting' && !started) {
+    action = `<div class="dr-clock">🎬 The draft starts later tonight. <b>${esc(playerName(d.captains[0]))}</b> picks first.</div>
+      ${room}
+      ${isAdmin() ? '<button class="btn dr-start" data-action="draft-start">Start the draft</button>' : '<p class="muted dr-wait">Tate starts it when everyone\'s together.</p>'}`;
+  } else if (d.stage === 'drafting') {
     const on = esc(playerName(d.captains[d.turn]));
     action = `<div class="dr-clock">Pick ${d.picks.length + 1} of ${total} · <b>${on}</b> is on the clock</div>
+      ${audioUnlocked ? '' : room}
       ${canPick ? `<div class="dr-pool">${d.pool.map((p) => `<button data-action="draft-pick" data-player="${p}">${esc(playerName(p))}</button>`).join('')}</div>`
         : `<p class="muted dr-wait">Waiting on ${on}… Picks show up here live.</p>`}
       ${isAdmin() && d.picks.length ? '<button class="link" data-action="draft-undo">Undo last pick</button>' : ''}`;
@@ -572,7 +582,7 @@ function draftCard(config) {
       </div>`).join('') : '<p class="muted">The captains can name their teams and pick colors here.</p>';
   }
   return `<div class="card dr-card">
-    <div class="cr-head"><span>🎯 ${d.stage === 'done' ? 'The teams' : 'The Draft'}</span><span>${d.stage === 'done' ? 'Draft complete' : 'Low score picks first'}</span></div>
+    <div class="cr-head"><span>🎯 ${d.stage === 'done' ? 'The teams' : 'The Draft'}</span><span>${d.stage === 'done' ? 'Draft complete · tap a name to rewatch' : started ? 'Live' : 'Starts tonight'}</span></div>
     <div class="dr-cols">${cols}</div>
     ${action}
   </div>`;
@@ -1093,7 +1103,7 @@ function renderSetup() {
   const draftStatus = d.stage === 'captains'
     ? (d.cr?.allDone ? 'Tied for a captain spot: waiting on the putt-off.' : "Waiting on Friday's scores.")
     : `Captains: <b>${name(d.captains[0])}</b> (picks first) and <b>${name(d.captains[1])}</b>${d.manual ? ' · set by hand' : ' · from Friday'}.
-      ${d.stage === 'done' ? 'Draft complete.' : `${d.picks.length} of ${PLAYER_IDS.length - 2} picks made.`}`;
+      ${d.stage === 'done' ? 'Draft complete.' : config.draft?.started ? `Draft is live: ${d.picks.length} of ${PLAYER_IDS.length - 2} picks made.` : 'Draft not started yet.'}`;
 
   const tuePairs = config.tuePicks?.pairs || [];
 
@@ -1113,6 +1123,8 @@ function renderSetup() {
       }).join('')}</div>
       <div class="setup-actions">
         ${manual.length ? '<button class="link" data-action="captain-auto">Use Friday\'s scores instead</button>' : ''}
+        ${d.stage === 'drafting' && !config.draft?.started ? '<button class="link" data-action="draft-start">Start the draft</button>' : ''}
+        ${d.stage === 'drafting' && config.draft?.started ? '<button class="link" data-action="draft-stop">Back to "starts later"</button>' : ''}
         ${d.picks?.length ? '<button class="link" data-action="draft-undo">Undo last pick</button>' : ''}
         ${d.picks?.length || config.teams.length ? '<button class="link danger" data-action="draft-reset">Reset the draft</button>' : ''}
       </div>
@@ -1536,6 +1548,214 @@ function namePicker() {
   </div></div>`;
 }
 
+// ---------- Draft night reveals ----------
+//
+// Full-screen reveals for the captains (when Tate starts the draft) and for
+// every pick: a drumroll line, the name drop, the player's highlight and his
+// scouting card. They stay up until tapped; if another pick lands meanwhile
+// it waits its turn. Music needs one tap per phone ("Enter the draft room")
+// because phones block sound until the page has been touched.
+
+let audioUnlocked = false;
+let themeAudio = null;
+const reveals = [];
+
+function theme() {
+  if (!themeAudio) {
+    themeAudio = new Audio(DRAFT_THEME);
+    themeAudio.preload = 'auto';
+  }
+  return themeAudio;
+}
+function unlockAudio() {
+  const a = theme();
+  return a.play().then(() => { a.pause(); a.currentTime = 0; audioUnlocked = true; }).catch(() => {});
+}
+function playTheme() {
+  if (!audioUnlocked) return;
+  const a = theme();
+  a.currentTime = 0;
+  a.play().catch(() => {});
+}
+
+const ordinal = (n) => `${n}${[, 'st', 'nd', 'rd'][n % 100 > 10 && n % 100 < 14 ? 0 : n % 10] || 'th'}`;
+
+// What a player did on Friday, for his scouting card (null if he didn't play).
+function fridayStats(pid) {
+  const cr = draft.cr;
+  const r = cr?.rows.find((x) => x.id === pid);
+  if (!r?.thru) return null;
+  const round = cr.round;
+  const sc = store.scores[round.id]?.[pid] || {};
+  const pars = view.pars?.[round.id] || {};
+  const [front, back] = halvesOf(round);
+  const played = holesOf(round).filter((h) => sc[h]);
+  const diff = (h) => sc[h] - (pars[h] || 0);
+  const pick = (better) => played.reduce((b, h) => (b == null || better(diff(h), diff(b)) ? h : b), null);
+  return {
+    ...r, of: cr.rows.length, sc, pars,
+    out: front.reduce((a, h) => a + (sc[h] || 0), 0),
+    inn: back.reduce((a, h) => a + (sc[h] || 0), 0),
+    birdies: played.filter((h) => diff(h) <= -1).length,
+    doubles: played.filter((h) => diff(h) >= 2).length,
+    best: pick((x, y) => x < y),
+    worst: pick((x, y) => x > y),
+  };
+}
+
+function scoutCard(pid) {
+  const f = fridayStats(pid);
+  const stats = f ? `
+    <div class="rv-stats">
+      <div><b>${f.done ? f.gross : fmtToPar(f.toPar)}</b><small>${f.done ? `${fmtToPar(f.toPar)} · ${ordinal(f.rank)} of ${f.of}` : `thru ${f.thru}`}</small></div>
+      <div><b>${f.done ? `${f.out}/${f.inn}` : '–'}</b><small>Out / In</small></div>
+      <div><b class="red">${f.birdies}</b><small>Birdies</small></div>
+      <div><b>${f.doubles}</b><small>Double+</small></div>
+    </div>
+    <div class="rv-holes">
+      <div>Best: ${marked(f.sc[f.best], f.pars[f.best])} on <b>#${f.best}</b></div>
+      <div>Worst: ${marked(f.sc[f.worst], f.pars[f.worst])} on <b>#${f.worst}</b></div>
+    </div>` : '<div class="rv-nofilm">Didn\'t play Friday 👀 No film from the Captain Round.</div>';
+  return `<div class="rv-card">
+    <div class="rv-card-head"><span>Scouting report</span><span>${f ? `Friday · ${esc(draft.cr.round.course)}` : 'Mystery man'}</span></div>
+    ${stats}
+    ${SCOUTING[pid] ? `<div class="rv-report"><span>The book on ${esc(playerName(pid))}</span>${esc(SCOUTING[pid])}</div>` : ''}
+  </div>`;
+}
+
+// One reveal: { pid, color, kicker, line1, line2, pill, selects, sub, roster, music, skipIntro }
+// or a title card: { title, sub, color }.
+function queueReveal(item) {
+  reveals.push(item);
+  const open = document.querySelector('.rv');
+  if (!open) showNextReveal();
+  else if (!item.seq) open.querySelector('.rv-next')?.removeAttribute('hidden');
+}
+
+function showNextReveal() {
+  const item = reveals.shift();
+  if (!item) { showNextCelebration(); return; }
+  const el = document.createElement('div');
+  el.className = 'rv';
+  el.style.setProperty('--c', item.color || '#16402b');
+  const soundBtn = () => (audioUnlocked ? '🎵 Draft theme' : '🔊 Tap for music');
+  if (item.title) {
+    el.innerHTML = `<div class="rv-intro show-all">
+      <div class="rv-kicker">The Buckle Up Draft</div>
+      <div class="rv-l1 show">${item.title}</div>
+      <div class="rv-l2 show">${item.sub || ''}</div>
+      <div class="rv-tap">Tap to start picking</div>
+    </div>`;
+  } else {
+    const h = HIGHLIGHTS[item.pid] || {};
+    const media = h.video
+      ? `<video class="rv-media" src="${h.video}" muted playsinline loop preload="auto" style="object-position:${h.focus || '50% 50%'}"></video>`
+      : h.photo ? `<img class="rv-media rv-photo" src="${h.photo}" alt="">` : '';
+    el.innerHTML = `
+      <div class="rv-intro ${item.skipIntro ? 'gone' : ''}">
+        <div class="rv-kicker">${item.kicker || 'The Buckle Up Draft'}</div>
+        <div class="rv-l1">${item.line1 || ''}</div>
+        <div class="rv-l2">${item.line2 || ''}<span class="rv-dots"><span>.</span><span>.</span><span>.</span></span></div>
+      </div>
+      <div class="rv-reveal ${media ? '' : 'plain'}">
+        ${media}
+        <div class="rv-shade"></div>
+        <div class="rv-top"><span class="rv-pill">${item.pill || ''}</span><button class="rv-sound">${soundBtn()}</button></div>
+        <div class="rv-confetti"></div>
+        <div class="rv-bottom">
+          <div class="rv-selects">${item.selects || ''}</div>
+          <div class="rv-name">${esc(playerName(item.pid))}</div>
+          <div class="rv-team"><i></i>${item.sub || ''}</div>
+          ${scoutCard(item.pid)}
+          ${item.roster ? `<div class="rv-roster">${item.roster}</div>` : ''}
+          <div class="rv-tap">Tap to continue</div>
+        </div>
+      </div>
+      <div class="rv-flash"></div>`;
+  }
+  el.insertAdjacentHTML('beforeend', `<div class="rv-next" ${reveals.length && !item.seq ? '' : 'hidden'}>Next pick is in → tap</div>`);
+  document.body.appendChild(el);
+
+  const timers = [];
+  const at = (ms, fn) => timers.push(setTimeout(fn, ms));
+  let phase = item.title ? 'done' : 'intro';
+  const video = el.querySelector('video');
+  const drop = () => {
+    if (phase !== 'intro') return;
+    phase = 'reveal';
+    el.querySelector('.rv-intro').classList.add('gone');
+    el.querySelector('.rv-reveal').classList.add('show');
+    video?.play().catch(() => {});
+    if (!item.skipIntro) {
+      el.querySelector('.rv-flash').classList.add('go');
+      const colors = [item.color || '#16402b', '#d9ad4a', '#f4efe3'];
+      el.querySelector('.rv-confetti').innerHTML = Array.from({ length: 40 }, (_, i) => `<i style="left:${Math.random() * 100}%;background:${colors[i % 3]};animation-delay:${(Math.random() * 0.5).toFixed(2)}s;animation-duration:${(1.8 + Math.random()).toFixed(2)}s"></i>`).join('');
+    }
+    requestAnimationFrame(() => el.querySelector('.rv-name').classList.add('in'));
+    at(item.skipIntro ? 100 : 2600, () => el.querySelector('.rv-card')?.classList.add('in'));
+    at(item.skipIntro ? 200 : 3200, () => { el.querySelector('.rv-roster')?.classList.add('in'); phase = 'done'; });
+  };
+  if (item.music) playTheme();
+  if (!item.title) {
+    if (item.skipIntro) drop();
+    else {
+      at(400, () => el.querySelector('.rv-l1').classList.add('show'));
+      at(1500, () => el.querySelector('.rv-l2').classList.add('show'));
+      at(3200, drop);
+    }
+  }
+  el.addEventListener('click', (e) => {
+    if (e.target.closest('.rv-sound')) {
+      if (!audioUnlocked) unlockAudio().then(() => { playTheme(); e.target.textContent = soundBtn(); });
+      return;
+    }
+    if (phase === 'intro') { timers.forEach(clearTimeout); drop(); return; }
+    timers.forEach(clearTimeout);
+    el.classList.add('out');
+    setTimeout(() => { el.remove(); showNextReveal(); }, 200);
+  });
+}
+
+// The team a pick went to, as named on draft night.
+function draftTeamName(team) {
+  const cap = draft.captains?.[team];
+  const t = store.config.teams?.[team];
+  return t?.name && t.players?.[0] === cap ? t.name : `Team ${playerName(cap)}`;
+}
+const draftColor = (team) => store.config.teams?.[team]?.color || TEAM_COLORS[team];
+
+function captainReveals() {
+  const [c1, c2] = draft.captains;
+  const sub = (pid) => {
+    const f = fridayStats(pid);
+    return f?.done ? `Shot ${f.gross} (${fmtToPar(f.toPar)}) on Friday` : 'Captain';
+  };
+  return [
+    { pid: c2, color: draftColor(1), kicker: 'The Buckle Up Draft', line1: 'Your Buckle Up<br>captains are…', line2: 'Captain No. 2',
+      pill: 'Captain', selects: 'Captain', sub: sub(c2), music: true, seq: true },
+    { pid: c1, color: draftColor(0), kicker: 'The Buckle Up Draft', line1: 'And the medalist…', line2: 'Captain No. 1',
+      pill: draft.manual ? 'Captain' : 'Medalist 🏅', selects: draft.manual ? 'Captain' : 'Medalist 🏅', sub: sub(c1), seq: true },
+    { title: `${esc(playerName(c1))} picks first`, sub: 'The draft is open.', color: draftColor(0), seq: true },
+  ];
+}
+
+function pickReveal(n, { replay = false } = {}) {
+  const pid = draft.picks[n];
+  const team = n % 2;
+  const total = PLAYER_IDS.length - 2;
+  const roster = [draft.captains[team], ...draft.picks.slice(0, n + 1).filter((_, i) => i % 2 === team)];
+  return {
+    pid, color: draftColor(team), music: !replay, skipIntro: replay,
+    kicker: `The Buckle Up Draft · Round ${Math.floor(n / 2) + 1}`,
+    line1: `With the ${ordinal(n + 1)} pick<br>in the Buckle Up Draft…`,
+    line2: `<b>${esc(draftTeamName(team))}</b> selects`,
+    pill: replay ? `Pick ${n + 1} · Replay` : `Pick ${n + 1} of ${total}`,
+    selects: `${esc(draftTeamName(team))} selects`,
+    sub: `${esc(draftTeamName(team))} · pick ${n + 1} of ${total}`,
+    roster: `${esc(draftTeamName(team))}: ${roster.map((p, i) => `<em class="${p === pid ? 'new' : ''}">${esc(playerName(p))}${i === 0 ? ' (C)' : ''}</em>`).join('')}`,
+  };
+}
+
 // ---------- Match-winning banner ----------
 
 // Banners only show for things that just happened: never seen on this phone
@@ -1590,29 +1810,17 @@ function checkForFinishes() {
       }
     }
   }
-  // Friday: the captain reveal, then every draft pick as it happens.
-  const draftAt = store.config.draft?.at || 0;
-  if (draft.captains) {
-    const cr = draft.cr;
-    const at = draft.manual ? draftAt : scoredAt(cr.round.id, cr.rows.map((r) => r.id), holesOf(cr.round));
+  // Draft night: the Captains Reveal when Tate starts the draft (shown to
+  // anyone who hasn't seen it while the draft is on), then every pick.
+  const dc = store.config.draft || {};
+  if (draft.captains && dc.started) {
+    const caps = draft.captains.join('-');
     events.push({
-      key: `captains:${draft.captains.join('-')}`, at,
-      banner: () => ({
-        color: '#b8860b', kicker: draft.manual ? 'The Draft' : `Captain Round · ${esc(cr.round.course)}`,
-        title: 'Your captains', score: '🎖️', big: true,
-        sub: `<b>${esc(playerName(draft.captains[0]))}</b> & <b>${esc(playerName(draft.captains[1]))}</b><br>${esc(playerName(draft.captains[0]))} picks first`,
-      }),
+      key: `draftstart:${caps}:${dc.startedAt}`, at: dc.startedAt, always: draft.stage !== 'done',
+      reveal: () => captainReveals(),
     });
     (draft.picks || []).forEach((p, n) => {
-      const team = n % 2;
-      events.push({
-        key: `pick:${draft.captains.join('-')}:${n}:${p}`, at: draftAt,
-        banner: () => ({
-          color: store.config.teams?.[team]?.color || TEAM_COLORS[team], kicker: `The Draft · Pick ${n + 1}`,
-          title: `${esc(playerName(draft.captains[team]))} picks`, score: esc(playerName(p)),
-          sub: draft.stage === 'done' && n === draft.picks.length - 1 ? 'The teams are set!' : '',
-        }),
-      });
+      events.push({ key: `pick:${caps}:${n}:${p}`, at: dc.times?.[n] || dc.at, reveal: () => [pickReveal(n)] });
     });
   }
 
@@ -1621,16 +1829,16 @@ function checkForFinishes() {
   for (const e of events) {
     if (seen?.has(e.key)) continue;
     changed = true;
-    if (seen && e.at && now - e.at < RECENT_MS) {
-      if (e.first) celebrations.unshift(e.banner());
-      else celebrations.push(e.banner());
-    }
+    if (!seen || !(e.always || (e.at && now - e.at < RECENT_MS))) continue;
+    if (e.reveal) e.reveal().forEach(queueReveal);
+    else if (e.first) celebrations.unshift(e.banner());
+    else celebrations.push(e.banner());
   }
   if (changed) {
     seen = new Set([...(seen || []), ...events.map((e) => e.key)]);
     try { localStorage.setItem(SEEN_KEY, JSON.stringify([...seen].slice(-500))); } catch {}
   }
-  if (celebrations.length && !document.querySelector('.win-banner')) showNextCelebration();
+  if (celebrations.length && !document.querySelector('.win-banner, .rv')) showNextCelebration();
 }
 
 function matchBanner(m, res) {
@@ -1662,6 +1870,7 @@ function championBanner(team) {
 }
 
 function showNextCelebration() {
+  if (document.querySelector('.rv, .win-banner')) return;
   const c = celebrations.shift();
   if (!c) return;
   const el = document.createElement('div');
@@ -1908,6 +2117,8 @@ app.addEventListener('click', async (e) => {
           : c.draft.captains.length >= 2 ? [pid] : [...c.draft.captains, pid];
         c.draft.captains = caps;
         c.draft.picks = [];
+        c.draft.times = [];
+        c.draft.started = false;
         c.draft.at = Date.now();
         c.teams = [];
         c.tuePicks = { pairs: [] };
@@ -1917,17 +2128,44 @@ app.addEventListener('click', async (e) => {
     case 'captain-auto':
       saveSetup((c) => { c.draft.captains = []; });
       return;
+    case 'enter-room':
+      unlockAudio().then(() => { toast("🎧 You're in the draft room"); render(); });
+      return;
+    case 'draft-start':
+      if (!isAdmin() || draft.stage !== 'drafting') return;
+      if (!confirm("Start the draft? Every phone plays the Captains Reveal and the first pick goes on the clock.")) return;
+      if (!audioUnlocked) unlockAudio();
+      store.updateConfig((c) => {
+        c.draft.started = true;
+        c.draft.startedAt = Date.now();
+      }).catch(showError);
+      return;
+    case 'draft-stop':
+      if (!isAdmin() || !confirm('Put the draft back to "starts later"? Picks made so far stay.')) return;
+      saveSetup((c) => { c.draft.started = false; });
+      return;
+    case 'replay-reveal': {
+      const pid = el.dataset.player;
+      const n = draft.picks.indexOf(pid);
+      if (n >= 0) queueReveal(pickReveal(n, { replay: true }));
+      else if (draft.captains?.includes(pid)) {
+        const i = draft.captains.indexOf(pid);
+        queueReveal({ ...captainReveals()[1 - i], music: false, skipIntro: true });
+      }
+      return;
+    }
     case 'draft-pick': {
       const d = draft;
       const pid = el.dataset.player;
-      if (d.stage !== 'drafting' || !d.pool.includes(pid)) return;
+      if (d.stage !== 'drafting' || !d.pool.includes(pid) || !store.config.draft?.started) return;
       if (!isAdmin() && ui.me !== d.captains[d.turn]) return;
       if (!confirm(`Draft ${playerName(pid)} to Team ${playerName(d.captains[d.turn])}?`)) return;
       const turn = d.turn;
       store.updateConfig((c) => {
         const now = draftState(c, store.scores, PLAYER_IDS);
-        if (now.stage !== 'drafting' || now.turn !== turn || !now.pool.includes(pid)) throw new Error('taken');
+        if (now.stage !== 'drafting' || now.turn !== turn || !now.pool.includes(pid) || !c.draft.started) throw new Error('taken');
         c.draft.picks = [...now.picks, pid];
+        c.draft.times = [...(c.draft.times || []).slice(0, now.picks.length), Date.now()];
         c.draft.at = Date.now();
         const after = draftState(c, store.scores, PLAYER_IDS);
         // Last pick: the teams are set, named after the captains until they rename them.
@@ -1944,14 +2182,17 @@ app.addEventListener('click', async (e) => {
       if (!isAdmin() || !confirm('Undo the last draft pick?')) return;
       saveSetup((c) => {
         c.draft.picks = draft.picks.slice(0, -1);
+        c.draft.times = (c.draft.times || []).slice(0, draft.picks.length - 1);
         c.teams = [];
         c.tuePicks = { pairs: [] };
       });
       return;
     case 'draft-reset':
-      if (!confirm('Reset the draft? This clears every pick and the teams.')) return;
+      if (!confirm('Reset the draft? This clears every pick and the teams, and it goes back to "starts later".')) return;
       saveSetup((c) => {
         c.draft.picks = [];
+        c.draft.times = [];
+        c.draft.started = false;
         c.teams = [];
         c.tuePicks = { pairs: [] };
       });

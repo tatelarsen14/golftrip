@@ -24,7 +24,10 @@ function withDefaults(saved) {
   const config = structuredClone(DEFAULT_CONFIG);
   if (saved?.v !== DEFAULT_CONFIG.v) return config;
   config.teams = saved.teams || [];
-  config.draft = { captains: saved.draft?.captains || [], picks: saved.draft?.picks || [], at: saved.draft?.at || 0 };
+  config.draft = {
+    captains: saved.draft?.captains || [], picks: saved.draft?.picks || [], times: saved.draft?.times || [],
+    at: saved.draft?.at || 0, started: !!saved.draft?.started, startedAt: saved.draft?.startedAt || 0,
+  };
   config.tuePicks = { pairs: (saved.tuePicks?.pairs || []).map((x) => (typeof x === 'string' ? x.split('|') : x)) };
   config.puttoffs = saved.puttoffs || {};
   for (const r of saved.rounds || []) {
@@ -40,7 +43,10 @@ function withDefaults(saved) {
 const setupFields = ({ teams = [], draft, tuePicks, rounds, puttoffs = {} }) => JSON.parse(JSON.stringify({
   v: DEFAULT_CONFIG.v,
   teams,
-  draft: { captains: draft?.captains || [], picks: draft?.picks || [], at: draft?.at || 0 },
+  draft: {
+    captains: draft?.captains || [], picks: draft?.picks || [], times: draft?.times || [],
+    at: draft?.at || 0, started: !!draft?.started, startedAt: draft?.startedAt || 0,
+  },
   // Firestore can't hold arrays inside arrays, so each matchup is "a|b".
   tuePicks: { pairs: (tuePicks?.pairs || []).map((x) => (Array.isArray(x) ? x.join('|') : x)) },
   rounds: rounds.map((r) => Object.fromEntries(SAVED_ROUND_FIELDS.map((f) => [f, r[f] ?? null]))),

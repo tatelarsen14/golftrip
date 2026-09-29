@@ -26,6 +26,17 @@ alternate (A, B, A, B, A, B). Skyler and JP are in the pool. Every pick pops up 
 phone. After the last pick, each captain names their team and picks a color. Tate can
 set captains by hand, undo a pick or reset the draft in Setup.
 
+**Draft night.** Picking stays locked until Tate taps **Start the draft** (on the
+Leaderboard or in Setup). Everyone taps **Enter the draft room** once so their phone can
+play the draft theme. Starting it plays the **Captains Reveal** on every phone (captain
+No. 2, then the medalist, then "the draft is open"), and every pick gets its own
+full-screen reveal: a drumroll line, the name drop, the player's highlight clip (or
+photo) and his scouting card (Friday stats plus the scouting report). Reveals stay up
+until tapped; tap a drafted name on the board to rewatch one. The pool shows names only,
+so nobody sees a card or clip before the player is picked. Scouting lines live in
+`js/draftkit.js`, clips and the theme in `media/draft/` (edited originals in `draft-kit/`,
+which isn't published).
+
 ### Sat–Mon: match play
 
 Two groups of 4, two players from each team in each group: best ball 2 v 2 on the front,
