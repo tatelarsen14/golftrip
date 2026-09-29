@@ -15,12 +15,11 @@
     "garrett": "players/garrett/highlight.mp4",
     "tate": "players/tate/highlight.mp4",
     "josh": "players/josh/highlight.mp4",
-    "sam": "players/sam/highlight.mp4"
+    "sam": "players/sam/highlight.mp4",
+    "jp": "players/jp/highlight.mp4"
   },
   "theme": "draft-theme.m4a",
-  "todo": [
-    "JP clip or photo"
-  ],
+  "todo": [],
   "photos": {
     "skyler": "players/skyler/photo.jpg"
   }

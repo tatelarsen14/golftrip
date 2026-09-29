@@ -20,6 +20,7 @@ export const HIGHLIGHTS = {
   brody: { video: 'media/draft/brody.mp4', focus: '8% 50%' },
   josh: { video: 'media/draft/josh.mp4', focus: '20% 50%' },
   sam: { video: 'media/draft/sam.mp4' },
+  jp: { video: 'media/draft/jp.mp4' },
   skyler: { photo: 'media/draft/skyler.jpg' },
 };
 
