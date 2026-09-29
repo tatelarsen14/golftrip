@@ -9,11 +9,15 @@
     "sam": "Man knows how to put in the work at the range. Miss is the low left, but could also hit a 300-yard bomb. Best ball partner? Elite."
   },
   "clips": {
-    "brody": "players/brody/highlight.mp4"
+    "brody": "players/brody/highlight.mp4",
+    "jonah": "players/jonah/highlight.mp4"
   },
   "theme": "draft-theme.m4a",
   "todo": [
     "JP scouting line",
     "clips for other players"
-  ]
+  ],
+  "photos": {
+    "skyler": "players/skyler/photo.jpg"
+  }
 }
