@@ -565,8 +565,10 @@ function draftCard(config) {
       ${isAdmin() ? '<button class="btn dr-start" data-action="draft-start">Start the draft</button>' : '<p class="muted dr-wait">Tate starts it when everyone\'s together.</p>'}`;
   } else if (d.stage === 'drafting') {
     const on = esc(playerName(d.captains[d.turn]));
+
     action = `<div class="dr-clock">Pick ${d.picks.length + 1} of ${total} · <b>${on}</b> is on the clock</div>
       ${audioUnlocked ? '' : room}
+      <button class="btn dr-start" data-action="draft-room-open">🎬 Open the draft room</button>
       ${canPick ? `<div class="dr-pool">${d.pool.map((p) => `<button data-action="draft-pick" data-player="${p}">${esc(playerName(p))}</button>`).join('')}</div>`
         : `<p class="muted dr-wait">Waiting on ${on}… Picks show up here live.</p>`}
       ${isAdmin() && d.picks.length ? '<button class="link" data-action="draft-undo">Undo last pick</button>' : ''}`;
@@ -1552,13 +1554,12 @@ function namePicker() {
 //
 // Full-screen reveals for the captains (when Tate starts the draft) and for
 // every pick: a drumroll line, the name drop, the player's highlight and his
-// scouting card. They stay up until tapped; if another pick lands meanwhile
-// it waits its turn. Music needs one tap per phone ("Enter the draft room")
-// because phones block sound until the page has been touched.
+// scouting card, shown in the draft room (below). Music needs one tap per
+// phone ("Enter the draft room") because phones block sound until the page
+// has been touched.
 
 let audioUnlocked = false;
 let themeAudio = null;
-const reveals = [];
 
 function theme() {
   if (!themeAudio) {
@@ -1623,66 +1624,50 @@ function scoutCard(pid) {
   </div>`;
 }
 
-// One reveal: { pid, color, kicker, line1, line2, pill, selects, sub, roster, music, skipIntro }
-// or a title card: { title, sub, color }.
-function queueReveal(item) {
-  reveals.push(item);
-  const open = document.querySelector('.rv');
-  if (!open) showNextReveal();
-  else if (!item.seq) open.querySelector('.rv-next')?.removeAttribute('hidden');
-}
-
-function showNextReveal() {
-  const item = reveals.shift();
-  if (!item) { showNextCelebration(); return; }
-  const el = document.createElement('div');
-  el.className = 'rv';
-  el.style.setProperty('--c', item.color || '#16402b');
+// Fills `el` with one reveal and plays it: the drumroll lines, then the name
+// drop, clip, confetti and scouting card. With `skipIntro` it lands straight
+// on the finished reveal (a phone that joins late, or a rewatch).
+// item: { pid, color, kicker, line1, line2, pill, selects, sub, roster, skipIntro }
+//    or a title card: { title, sub, color }. Returns the timers to cancel.
+function mountReveal(el, item) {
   const soundBtn = () => (audioUnlocked ? '🎵 Draft theme' : '🔊 Tap for music');
+  el.style.setProperty('--c', item.color || '#16402b');
   if (item.title) {
     el.innerHTML = `<div class="rv-intro show-all">
       <div class="rv-kicker">The Buckle Up Draft</div>
       <div class="rv-l1 show">${item.title}</div>
       <div class="rv-l2 show">${item.sub || ''}</div>
-      <div class="rv-tap">Tap to start picking</div>
     </div>`;
-  } else {
-    const h = HIGHLIGHTS[item.pid] || {};
-    const media = h.video
-      ? `<video class="rv-media" src="${h.video}" muted playsinline loop preload="auto" style="object-position:${h.focus || '50% 50%'}"></video>`
-      : h.photo ? `<img class="rv-media rv-photo" src="${h.photo}" alt="">` : '';
-    el.innerHTML = `
-      <div class="rv-intro ${item.skipIntro ? 'gone' : ''}">
-        <div class="rv-kicker">${item.kicker || 'The Buckle Up Draft'}</div>
-        <div class="rv-l1">${item.line1 || ''}</div>
-        <div class="rv-l2">${item.line2 || ''}<span class="rv-dots"><span>.</span><span>.</span><span>.</span></span></div>
-      </div>
-      <div class="rv-reveal ${media ? '' : 'plain'}">
-        ${media}
-        <div class="rv-shade"></div>
-        <div class="rv-top"><span class="rv-pill">${item.pill || ''}</span><button class="rv-sound">${soundBtn()}</button></div>
-        <div class="rv-confetti"></div>
-        <div class="rv-bottom">
-          <div class="rv-selects">${item.selects || ''}</div>
-          <div class="rv-name">${esc(playerName(item.pid))}</div>
-          <div class="rv-team"><i></i>${item.sub || ''}</div>
-          ${scoutCard(item.pid)}
-          ${item.roster ? `<div class="rv-roster">${item.roster}</div>` : ''}
-          <div class="rv-tap">Tap to continue</div>
-        </div>
-      </div>
-      <div class="rv-flash"></div>`;
+    return [];
   }
-  el.insertAdjacentHTML('beforeend', `<div class="rv-next" ${reveals.length && !item.seq ? '' : 'hidden'}>Next pick is in → tap</div>`);
-  document.body.appendChild(el);
-
+  const h = HIGHLIGHTS[item.pid] || {};
+  const media = h.video
+    ? `<video class="rv-media" src="${h.video}" muted playsinline loop autoplay preload="auto" style="object-position:${h.focus || '50% 50%'}"></video>`
+    : h.photo ? `<img class="rv-media rv-photo" src="${h.photo}" alt="">` : '';
+  el.innerHTML = `
+    <div class="rv-intro ${item.skipIntro ? 'gone' : ''}">
+      <div class="rv-kicker">${item.kicker || 'The Buckle Up Draft'}</div>
+      <div class="rv-l1">${item.line1 || ''}</div>
+      <div class="rv-l2">${item.line2 || ''}<span class="rv-dots"><span>.</span><span>.</span><span>.</span></span></div>
+    </div>
+    <div class="rv-reveal ${media ? '' : 'plain'}">
+      ${media}
+      <div class="rv-shade"></div>
+      <div class="rv-top"><span class="rv-pill">${item.pill || ''}</span><button class="rv-sound">${soundBtn()}</button></div>
+      <div class="rv-confetti"></div>
+      <div class="rv-bottom">
+        <div class="rv-selects">${item.selects || ''}</div>
+        <div class="rv-name">${esc(playerName(item.pid))}</div>
+        <div class="rv-team"><i></i>${item.sub || ''}</div>
+        ${scoutCard(item.pid)}
+        ${item.roster ? `<div class="rv-roster">${item.roster}</div>` : ''}
+      </div>
+    </div>
+    <div class="rv-flash"></div>`;
   const timers = [];
   const at = (ms, fn) => timers.push(setTimeout(fn, ms));
-  let phase = item.title ? 'done' : 'intro';
   const video = el.querySelector('video');
   const drop = () => {
-    if (phase !== 'intro') return;
-    phase = 'reveal';
     el.querySelector('.rv-intro').classList.add('gone');
     el.querySelector('.rv-reveal').classList.add('show');
     video?.play().catch(() => {});
@@ -1692,27 +1677,191 @@ function showNextReveal() {
       el.querySelector('.rv-confetti').innerHTML = Array.from({ length: 40 }, (_, i) => `<i style="left:${Math.random() * 100}%;background:${colors[i % 3]};animation-delay:${(Math.random() * 0.5).toFixed(2)}s;animation-duration:${(1.8 + Math.random()).toFixed(2)}s"></i>`).join('');
     }
     requestAnimationFrame(() => el.querySelector('.rv-name').classList.add('in'));
-    at(item.skipIntro ? 100 : 2600, () => el.querySelector('.rv-card')?.classList.add('in'));
-    at(item.skipIntro ? 200 : 3200, () => { el.querySelector('.rv-roster')?.classList.add('in'); phase = 'done'; });
+    at(item.skipIntro ? 50 : 2600, () => el.querySelector('.rv-card')?.classList.add('in'));
+    at(item.skipIntro ? 100 : 3200, () => el.querySelector('.rv-roster')?.classList.add('in'));
   };
-  if (item.music) playTheme();
-  if (!item.title) {
-    if (item.skipIntro) drop();
-    else {
-      at(400, () => el.querySelector('.rv-l1').classList.add('show'));
-      at(1500, () => el.querySelector('.rv-l2').classList.add('show'));
-      at(3200, drop);
-    }
+  if (item.skipIntro) drop();
+  else {
+    at(400, () => el.querySelector('.rv-l1').classList.add('show'));
+    at(1500, () => el.querySelector('.rv-l2').classList.add('show'));
+    at(3200, drop);
   }
+  el.querySelector('.rv-sound').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!audioUnlocked) unlockAudio().then(() => { playTheme(); e.target.textContent = soundBtn(); });
+  });
+  return timers;
+}
+
+// Rewatching one pick from the draft board: its own overlay, tap to close.
+function queueReveal(item) {
+  if (document.querySelector('.rv-replay')) return;
+  const el = document.createElement('div');
+  el.className = 'rv rv-replay';
+  document.body.appendChild(el);
+  const scene = document.createElement('div');
+  scene.className = 'rv-scene';
+  el.appendChild(scene);
+  const timers = mountReveal(scene, { ...item, skipIntro: true });
+  el.insertAdjacentHTML('beforeend', '<div class="rv-bar"><span>Replay</span><button class="rv-btn">Close</button></div>');
   el.addEventListener('click', (e) => {
-    if (e.target.closest('.rv-sound')) {
-      if (!audioUnlocked) unlockAudio().then(() => { playTheme(); e.target.textContent = soundBtn(); });
-      return;
-    }
-    if (phase === 'intro') { timers.forEach(clearTimeout); drop(); return; }
+    if (e.target.closest('.rv-sound')) return;
     timers.forEach(clearTimeout);
-    el.classList.add('out');
-    setTimeout(() => { el.remove(); showNextReveal(); }, 200);
+    el.remove();
+  });
+}
+
+// ---------- The draft room ----------
+//
+// Once Tate starts the draft, every phone shows one shared screen that
+// follows the draft itself: the Captains Reveal on a fixed clock from the
+// moment it started, then always the latest pick. Nobody has to tap to keep
+// up; a phone that's behind (or reopens the app) jumps to where everyone is.
+// Only the captain on the clock (or Tate) gets a "Make your pick" button.
+
+const CAPTAIN_STEP_MS = 14000;
+let stageEl = null;
+let stageKey = null;
+let stageTimers = [];
+let stageTick = null;
+let pickSheetOpen = false;
+
+// What the room should show right now, or null when there's no live draft.
+function draftScene() {
+  const dc = store.config.draft || {};
+  if (!draft.captains || !dc.started) return null;
+  const now = Date.now();
+  if (!draft.picks?.length) {
+    const t = Math.max(0, now - (dc.startedAt || now));
+    const step = Math.min(2, Math.floor(t / CAPTAIN_STEP_MS));
+    return { key: `cap:${dc.startedAt}:${step}`, kind: 'captains', step, startAt: (dc.startedAt || now) + step * CAPTAIN_STEP_MS };
+  }
+  const n = draft.picks.length - 1;
+  return { key: `pick:${draft.captains.join('-')}:${n}:${draft.picks[n]}`, kind: 'pick', n, startAt: dc.times?.[n] || dc.at || now };
+}
+
+function closeStage() {
+  stageTimers.forEach(clearTimeout);
+  stageEl?.remove();
+  stageEl = null;
+  stageKey = null;
+  pickSheetOpen = false;
+}
+
+// Keeps the room in step with the draft: called on every render and once a
+// second while the Captains Reveal is running.
+function syncStage() {
+  const sc = draftScene();
+  const done = draft.stage === 'done';
+  const stale = sc && done && Date.now() - sc.startAt > 30 * 60 * 1000;
+  if (!sc || stale || ui.draftHidden === sc.key) {
+    closeStage();
+    clearInterval(stageTick);
+    stageTick = null;
+    return;
+  }
+  if (sc.kind === 'captains' && sc.step < 2 && !stageTick) stageTick = setInterval(syncStage, 1000);
+  if (sc.kind !== 'captains' || sc.step >= 2) { clearInterval(stageTick); stageTick = null; }
+
+  if (!stageEl) {
+    stageEl = document.createElement('div');
+    stageEl.className = 'rv rv-stage';
+    stageEl.innerHTML = '<div class="rv-scene"></div><div class="rv-bar"></div><div class="rv-sheet" hidden></div>';
+    stageEl.addEventListener('click', onStageClick);
+    document.body.appendChild(stageEl);
+  }
+  if (sc.key !== stageKey) {
+    stageKey = sc.key;
+    stageTimers.forEach(clearTimeout);
+    // Only phones that are there as it happens get the drumroll and music;
+    // anyone joining late lands on the finished reveal.
+    const fresh = Date.now() - sc.startAt < 6000;
+    let item;
+    if (sc.kind === 'captains') item = captainReveals()[sc.step];
+    else item = pickReveal(sc.n);
+    if (!item.title) item = { ...item, skipIntro: !fresh };
+    const scene = stageEl.querySelector('.rv-scene');
+    stageTimers = mountReveal(scene, item);
+    stageEl.style.setProperty('--c', item.color || '#16402b');
+    if (fresh && (sc.kind === 'pick' || sc.step === 0)) playTheme();
+    pickSheetOpen = false;
+  }
+  renderStageBar(sc);
+}
+
+function renderStageBar(sc) {
+  const bar = stageEl.querySelector('.rv-bar');
+  const sheet = stageEl.querySelector('.rv-sheet');
+  const hide = '<button class="rv-link" data-stage="hide">Board</button>';
+  let html;
+  if (draft.stage === 'done') {
+    html = `<span>🎉 Draft complete</span><button class="rv-btn" data-stage="hide">See the teams</button>`;
+  } else if (sc.kind === 'captains' && sc.step < 2) {
+    html = `<span>🎬 Captains Reveal</span>${hide}`;
+  } else {
+    const on = draft.captains[draft.turn];
+    const canPick = isAdmin() || ui.me === on;
+    const n = draft.picks.length + 1;
+    html = `<span>Pick ${n} of ${PLAYER_IDS.length - 2} · <b>${esc(ui.me === on ? 'You\'re' : `${playerName(on)} is`)}</b> on the clock</span>
+      ${ui.me === on ? '<button class="rv-btn" data-stage="pick">Make your pick →</button>'
+        : canPick ? `<button class="rv-link" data-stage="pick">Pick for ${esc(playerName(on))}</button>` : hide}`;
+  }
+  bar.innerHTML = html;
+  if (pickSheetOpen && draft.stage === 'drafting') {
+    sheet.hidden = false;
+    sheet.innerHTML = `<div class="rv-sheet-card">
+      <div class="rv-sheet-title">Pick ${draft.picks.length + 1} for ${esc(draftTeamName(draft.turn))}</div>
+      <div class="rv-pool">${draft.pool.map((p) => `<button data-stage="choose" data-player="${p}">${esc(playerName(p))}</button>`).join('')}</div>
+      <button class="rv-link" data-stage="cancel">Cancel</button>
+    </div>`;
+  } else {
+    sheet.hidden = true;
+  }
+}
+
+function onStageClick(e) {
+  const t = e.target.closest('[data-stage]');
+  if (!t) return;
+  const what = t.dataset.stage;
+  if (what === 'hide') {
+    ui.draftHidden = stageKey;
+    saveUI();
+    closeStage();
+    render();
+  } else if (what === 'pick') {
+    pickSheetOpen = true;
+    renderStageBar(draftScene());
+  } else if (what === 'cancel') {
+    pickSheetOpen = false;
+    renderStageBar(draftScene());
+  } else if (what === 'choose') {
+    makePick(t.dataset.player);
+  }
+}
+
+// A captain's pick, checked against the latest saved draft so two phones
+// can't pick at once.
+function makePick(pid) {
+  const d = draft;
+  if (d.stage !== 'drafting' || !d.pool.includes(pid) || !store.config.draft?.started) return;
+  if (!isAdmin() && ui.me !== d.captains[d.turn]) return;
+  if (!confirm(`Draft ${playerName(pid)} to ${draftTeamName(d.turn)}?`)) return;
+  const turn = d.turn;
+  pickSheetOpen = false;
+  store.updateConfig((c) => {
+    const now = draftState(c, store.scores, PLAYER_IDS);
+    if (now.stage !== 'drafting' || now.turn !== turn || !now.pool.includes(pid) || !c.draft.started) throw new Error('taken');
+    c.draft.picks = [...now.picks, pid];
+    c.draft.times = [...(c.draft.times || []).slice(0, now.picks.length), Date.now()];
+    c.draft.at = Date.now();
+    const after = draftState(c, store.scores, PLAYER_IDS);
+    // Last pick: the teams are set, named after the captains until they rename them.
+    if (after.stage === 'done') {
+      c.teams = after.rosters.map((players, i) => ({ name: `Team ${playerName(players[0])}`, color: TEAM_COLORS[i], players }));
+    }
+  }).catch((err) => {
+    if (err.message === 'taken') alert('That pick just changed on another phone. Take another look.');
+    else showError(err);
   });
 }
 
@@ -1810,20 +1959,6 @@ function checkForFinishes() {
       }
     }
   }
-  // Draft night: the Captains Reveal when Tate starts the draft (shown to
-  // anyone who hasn't seen it while the draft is on), then every pick.
-  const dc = store.config.draft || {};
-  if (draft.captains && dc.started) {
-    const caps = draft.captains.join('-');
-    events.push({
-      key: `draftstart:${caps}:${dc.startedAt}`, at: dc.startedAt, always: draft.stage !== 'done',
-      reveal: () => captainReveals(),
-    });
-    (draft.picks || []).forEach((p, n) => {
-      events.push({ key: `pick:${caps}:${n}:${p}`, at: dc.times?.[n] || dc.at, reveal: () => [pickReveal(n)] });
-    });
-  }
-
   const now = Date.now();
   let changed = !seen;
   for (const e of events) {
@@ -1950,6 +2085,7 @@ function render() {
         <span>${icon}</span>${label}</button>`).join('')}</nav>
     ${ui.pickingMe || (!ui.me && !ui.watching) ? namePicker() : ''}`;
   if (keepScroll) window.scrollTo(0, scrollY);
+  syncStage();
   if (focusId) {
     const el = document.getElementById(focusId);
     if (el) {
@@ -2154,30 +2290,12 @@ app.addEventListener('click', async (e) => {
       }
       return;
     }
-    case 'draft-pick': {
-      const d = draft;
-      const pid = el.dataset.player;
-      if (d.stage !== 'drafting' || !d.pool.includes(pid) || !store.config.draft?.started) return;
-      if (!isAdmin() && ui.me !== d.captains[d.turn]) return;
-      if (!confirm(`Draft ${playerName(pid)} to Team ${playerName(d.captains[d.turn])}?`)) return;
-      const turn = d.turn;
-      store.updateConfig((c) => {
-        const now = draftState(c, store.scores, PLAYER_IDS);
-        if (now.stage !== 'drafting' || now.turn !== turn || !now.pool.includes(pid) || !c.draft.started) throw new Error('taken');
-        c.draft.picks = [...now.picks, pid];
-        c.draft.times = [...(c.draft.times || []).slice(0, now.picks.length), Date.now()];
-        c.draft.at = Date.now();
-        const after = draftState(c, store.scores, PLAYER_IDS);
-        // Last pick: the teams are set, named after the captains until they rename them.
-        if (after.stage === 'done') {
-          c.teams = after.rosters.map((players, i) => ({ name: `Team ${playerName(players[0])}`, color: TEAM_COLORS[i], players }));
-        }
-      }).catch((err) => {
-        if (err.message === 'taken') alert('That pick just changed on another phone. Take another look.');
-        else showError(err);
-      });
+    case 'draft-pick':
+      makePick(el.dataset.player);
       return;
-    }
+    case 'draft-room-open':
+      ui.draftHidden = null;
+      break;
     case 'draft-undo':
       if (!isAdmin() || !confirm('Undo the last draft pick?')) return;
       saveSetup((c) => {

@@ -816,3 +816,20 @@ label.btn.disabled { opacity: .4; }
 .rv-confetti i { position: absolute; top: -12px; width: 8px; height: 14px; border-radius: 2px; animation: wb-fall 2.6s linear forwards; }
 .rv-next { position: absolute; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top) + 56px); background: #d9ad4a; color: #0d1f17; font: 700 12px Inter, sans-serif; border-radius: 99px; padding: 6px 12px; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
 .rv-next[hidden] { display: none; }
+
+/* the draft room: one shared screen, a bar for whoever's on the clock */
+.rv-scene { position: absolute; inset: 0; }
+.rv-stage .rv-bottom, .rv-replay .rv-bottom { padding-bottom: calc(env(safe-area-inset-bottom) + 72px); }
+.rv-bar { position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 16px calc(env(safe-area-inset-bottom) + 10px); background: rgba(7,18,12,.92); border-top: 1px solid rgba(255,255,255,.12);
+  font: 500 13px Inter, sans-serif; color: #f4efe3; }
+.rv-bar b { color: #d9ad4a; }
+.rv-btn { flex: 0 0 auto; border: 0; border-radius: 10px; padding: 10px 14px; font: 700 14px Inter, sans-serif; background: #d9ad4a; color: #0d1f17; }
+.rv-link { flex: 0 0 auto; background: none; border: 1px solid rgba(255,255,255,.3); color: #f4efe3; border-radius: 99px; padding: 6px 12px; font: 600 12px Inter, sans-serif; }
+.rv-sheet { position: absolute; inset: 0; z-index: 4; background: rgba(7,18,12,.7); display: flex; align-items: flex-end; }
+.rv-sheet[hidden] { display: none; }
+.rv-sheet-card { width: 100%; background: #fffdf7; color: #0d1f17; border-radius: 18px 18px 0 0; padding: 16px 16px calc(env(safe-area-inset-bottom) + 16px); }
+.rv-sheet-title { font: 700 18px Oswald, sans-serif; text-transform: uppercase; letter-spacing: .04em; color: #16402b; margin-bottom: 10px; }
+.rv-pool { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+.rv-pool button { border: 1px solid #16402b; background: #fffdf7; border-radius: 10px; padding: 12px 4px; font: 700 15px Inter, sans-serif; color: #16402b; }
+.rv-sheet .rv-link { color: #16402b; border-color: #e2dccb; width: 100%; padding: 10px; }

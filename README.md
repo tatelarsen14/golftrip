@@ -28,14 +28,17 @@ set captains by hand, undo a pick or reset the draft in Setup.
 
 **Draft night.** Picking stays locked until Tate taps **Start the draft** (on the
 Leaderboard or in Setup). Everyone taps **Enter the draft room** once so their phone can
-play the draft theme. Starting it plays the **Captains Reveal** on every phone (captain
-No. 2, then the medalist, then "the draft is open"), and every pick gets its own
-full-screen reveal: a drumroll line, the name drop, the player's highlight clip (or
-photo) and his scouting card (Friday stats plus the scouting report). Reveals stay up
-until tapped; tap a drafted name on the board to rewatch one. The pool shows names only,
-so nobody sees a card or clip before the player is picked. Scouting lines live in
-`js/draftkit.js`, clips and the theme in `media/draft/` (edited originals in `draft-kit/`,
-which isn't published).
+play the draft theme. From then on every phone shows the same **draft room** screen,
+driven by the draft itself so nobody has to tap to keep up: the **Captains Reveal** on a
+shared clock (captain No. 2, then the medalist 14 seconds later, then "the draft is
+open"), then always the latest pick, full screen, with the player's highlight clip (or
+photo) and his scouting card (Friday stats plus the scouting report). It stays on that
+pick until the next one lands. Only the captain on the clock gets a **Make your pick**
+button (Tate can pick for either captain). A phone that's behind or reopens the app jumps
+straight to the current pick. **Board** hides the room until the next pick; tap a drafted
+name on the board to rewatch a reveal. The pool shows names only, so nobody sees a card
+or clip before the player is picked. Scouting lines live in `js/draftkit.js`, clips and
+the theme in `media/draft/` (edited originals in `draft-kit/`, which isn't published).
 
 ### Sat–Mon: match play
 
