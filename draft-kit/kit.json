@@ -6,7 +6,8 @@
     "skyler": "Mystery pick 👀 Apparently a 2 on GHIN.",
     "brody": "Buckle Up CEO. Fired a 68 at SouthGate 3 weeks ago. The kid knows how to have fun. Don't give him an opportunity to be clutch.",
     "josh": "Currently battling a shoulder injury. Holds the record for the Crown Burger Mile. The kid is TUFF. Highest probability for most F-bombs this weekend.",
-    "sam": "Man knows how to put in the work at the range. Miss is the low left, but could also hit a 300-yard bomb. Best ball partner? Elite."
+    "sam": "Man knows how to put in the work at the range. Miss is the low left, but could also hit a 300-yard bomb. Best ball partner? Elite.",
+    "jp": "Wipes the floor at the Davis Golf Course men's league. Wants all his money back in skins. Hits a butter fade with the driver."
   },
   "clips": {
     "brody": "players/brody/highlight.mp4",
@@ -18,8 +19,7 @@
   },
   "theme": "draft-theme.m4a",
   "todo": [
-    "JP scouting line",
-    "clips for other players"
+    "JP clip or photo"
   ],
   "photos": {
     "skyler": "players/skyler/photo.jpg"
