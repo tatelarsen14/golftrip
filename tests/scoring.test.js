@@ -16,7 +16,10 @@ const TEAMS = [
   { name: 'Team Tate', color: '#2f7d4f', players: ['tate', 'sam', 'josh', 'jp'] },
   { name: 'Team Garrett', color: '#1f5f99', players: ['garrett', 'jonah', 'brody', 'skyler'] },
 ];
-const cfg = { ...structuredClone(DEFAULT_CONFIG), teams: TEAMS };
+// Most tests score gross (everyone a 3); the handicap tests use the real buckets.
+const GROSS = Object.fromEntries(IDS.map((p) => [p, 3]));
+const cfg = { ...structuredClone(DEFAULT_CONFIG), teams: TEAMS, hcp: GROSS };
+const hcpCfg = { ...structuredClone(DEFAULT_CONFIG), teams: TEAMS };
 const view = (scores = {}, c = cfg) => resolveConfig(c, scores);
 const matchesOf = (scores = {}, c = cfg) => buildMatches(view(scores, c));
 
@@ -44,7 +47,7 @@ test('before the draft every scoring round waits and there are no matches', () =
 
 test('after the draft: 6 matches a day Sat-Mon plus Quicksands; Tuesday waits', () => {
   const matches = matchesOf();
-  assert.equal(matches.length, 3 * 6 + 1);
+  assert.equal(matches.length, 3 * 6 + 2);
   const sat = matches.filter((m) => m.roundId === 'sat');
   assert.deepEqual(sat.map((m) => m.type), ['bestball', 'singles', 'singles', 'bestball', 'singles', 'singles']);
   assert.deepEqual(sat[0].sides.map((s) => s.players), [['tate', 'sam'], ['garrett', 'jonah']]);
@@ -52,9 +55,10 @@ test('after the draft: 6 matches a day Sat-Mon plus Quicksands; Tuesday waits', 
   const qs = matches.find((m) => m.roundId === 'qs');
   assert.equal(qs.type, 'teamstroke');
   assert.equal(qs.holes.length, 14);
+  assert.ok(matches.some((m) => m.roundId === 'qs' && m.type === 'teambirdies'));
   assert.equal(view().rounds.find((r) => r.id === 'tue').waitingOn, 'standings');
   const total = cfg.rounds.reduce((a, r) => a + roundPoints(r), 0);
-  assert.equal(total, 32);
+  assert.equal(total, 29);
 });
 
 test('best ball takes the low score and ignores pickups', () => {
@@ -233,7 +237,7 @@ const teamRound = (a, b, n = 18) => {
   return out;
 };
 
-test('Tuesday: waits for every earlier match, then the leader sets the matchups; 12 points', () => {
+test('Tuesday: waits for every earlier match, then the leader sets the matchups; 8 points', () => {
   const scores = { sat: teamRound(4, 5), sun: teamRound(4, 5), qs: teamRound(3, 3, 14), mon: teamRound(4, 5) };
   delete scores.qs.jp[14];
   let tue = view(scores).rounds.find((r) => r.id === 'tue');
@@ -261,7 +265,7 @@ test('Tuesday: waits for every earlier match, then the leader sets the matchups;
   assert.deepEqual(back.sides.map((s) => s.players[0]), ['tate', 'brody']); // opponents swap
   const pts = [0, 0];
   tueMatches.forEach((m) => computeMatch(m, scores.tue).points.forEach((p, si) => { pts[m.sides[si].team] += p; }));
-  assert.deepEqual(pts, [4, 8]);
+  assert.deepEqual(pts, [4, 4]);
 });
 
 test('Tuesday: level after every tiebreaker needs a putt-off to pick the leader', () => {
@@ -392,13 +396,99 @@ test('Tuesday matchup draft: trailing team puts out first, leader answers twice,
   assert.equal(tueDraftState({ ...cfg, tueDraft: { moves: ['tate'] } }, 0).moves.length, 0);
   d = tueDraftState(c, 0);
   assert.equal(d.done, true);
-  assert.deepEqual(d.back, [['tate', 'garrett'], ['sam', 'jonah'], ['josh', 'brody'], ['jp', 'skyler']]);
-  // Group 1: back 9 Tate v Garrett and Sam v Jonah, so the front 9 is Tate v Jonah and Sam v Garrett.
-  assert.deepEqual(d.pairs, [['tate', 'jonah'], ['sam', 'garrett'], ['josh', 'skyler'], ['jp', 'brody']]);
+  assert.deepEqual(d.front, [['tate', 'garrett'], ['sam', 'jonah'], ['josh', 'brody'], ['jp', 'skyler']]);
+  assert.deepEqual(d.pairs, d.front);
+  // Group 1: front 9 Tate v Garrett and Sam v Jonah, so the back 9 is Tate v Jonah and Sam v Garrett.
+  assert.deepEqual(d.back, [['tate', 'jonah'], ['sam', 'garrett'], ['josh', 'skyler'], ['jp', 'brody']]);
   const scores = {};
   const v = resolveConfig({ ...cfg, tuePicks: { pairs: d.pairs } }, scores);
   const tue = v.rounds.find((r) => r.id === 'tue');
   const backMatches = buildMatches({ ...v, rounds: [{ ...tue, pending: false, groups: [0, 1].map((gi) => ({ a: [d.pairs[gi * 2][0], d.pairs[gi * 2 + 1][0]], b: [d.pairs[gi * 2][1], d.pairs[gi * 2 + 1][1]] })) }] })
     .filter((m) => m.holes[0] === 10).map((m) => m.sides.map((s) => s.players[0]));
   assert.deepEqual(backMatches, d.back);
+});
+
+test('Quicksands birdie point: most gross birdies (eagles count), a tie splits it; round is worth 3', () => {
+  const m = matchesOf().find((x) => x.roundId === 'qs' && x.type === 'teambirdies');
+  const fourteen = (v) => holes(Array(14).fill(v));
+  const scores = Object.fromEntries(IDS.map((p) => [p, fourteen(3)]));
+  scores.tate[1] = 2; scores.sam[2] = 1; // 2 for Team Tate (an ace counts)
+  scores.garrett[3] = 2;
+  let r = computeMatch(m, scores);
+  assert.equal(r.done, true);
+  assert.deepEqual(r.points, [1, 0]);
+  scores.jonah[4] = 2;
+  r = computeMatch(m, scores);
+  assert.deepEqual(r.points, [0.5, 0.5]);
+  delete scores.jp[14];
+  assert.equal(computeMatch(m, scores).done, false);
+  assert.equal(roundPoints(cfg.rounds.find((x) => x.id === 'qs')), 3);
+});
+
+test('handicaps: 12s get 4 strokes a nine on the hardest holes, off the low man in the match', () => {
+  const ms = matchesOf({}, hcpCfg).filter((m) => m.roundId === 'sat');
+  // Saturday group 1: best ball Tate & Sam v Garrett & Jonah. Sam (12) gets 4 on the front.
+  const bb = ms.find((m) => m.id === 'sat-g1-bb');
+  assert.deepEqual(Object.keys(bb.strokes), ['sam']);
+  // Circling Raven front 9 hole handicaps: 7,11,15,1,5,13,17,9,3 → hardest are 4, 9, 5, 1.
+  assert.deepEqual(bb.strokes.sam, [1, 4, 5, 9]);
+  // Singles Tate (3) v Garrett (3): none. Sam (12) v Jonah (3): Sam gets 4 on the back.
+  assert.deepEqual(ms.find((m) => m.id === 'sat-g1-s1').strokes, {});
+  const s2 = ms.find((m) => m.id === 'sat-g1-s2');
+  assert.deepEqual(s2.strokes.sam, [12, 15, 17, 11].sort((a, b) => a - b));
+  // Group 2: Josh & JP (both 12) v Brody & Skyler (3s): both 12s get 4.
+  const bb2 = ms.find((m) => m.id === 'sat-g2-bb');
+  assert.deepEqual(Object.keys(bb2.strokes).sort(), ['josh', 'jp']);
+  // 12 v 12 in singles: no strokes.
+  const c = { ...hcpCfg, hcp: { ...hcpCfg.hcp, brody: 12 } };
+  assert.deepEqual(matchesOf({}, c).find((m) => m.id === 'sat-g2-s1').strokes, {});
+});
+
+test('handicaps: a net bogey halves a par on a stroke hole; the 3 needs a birdie', () => {
+  const m = matchesOf({}, hcpCfg).find((x) => x.id === 'sat-g1-s2'); // Sam (12) v Jonah (3), back 9
+  const scores = { sam: { 12: 6 }, jonah: { 12: 5 } }; // hole 12 is a stroke hole, par 5
+  let r = computeMatch(m, scores);
+  assert.equal(r.holes[2].winner, 'halve');
+  scores.jonah[12] = 4;
+  r = computeMatch(m, scores);
+  assert.equal(r.holes[2].winner, 1);
+  // Not a stroke hole: gross.
+  scores.sam[10] = 5; scores.jonah[10] = 4;
+  assert.equal(computeMatch(m, scores).holes[0].winner, 1);
+});
+
+test('handicaps: best ball uses the 12\'s net score', () => {
+  const m = matchesOf({}, hcpCfg).find((x) => x.id === 'sat-g1-bb');
+  // Hole 4 (par 4) is a stroke hole for Sam: his 4 is a net 3, beating Garrett's 4.
+  const scores = { tate: { 4: 5 }, sam: { 4: 4 }, garrett: { 4: 4 }, jonah: { 4: 5 } };
+  assert.equal(computeMatch(m, scores).holes[3].winner, 0);
+});
+
+test('handicaps at Quicksands: each 12 takes 4 off his total; birdies stay gross', () => {
+  const m = matchesOf({}, hcpCfg).find((x) => x.roundId === 'qs' && x.type === 'teamstroke');
+  const fourteen = (v) => holes(Array(14).fill(v));
+  const scores = Object.fromEntries(IDS.map((p) => [p, fourteen(3)]));
+  // Team Tate has three 12s (Sam, Josh, JP): 12 strokes off.
+  Object.values(m.strokes).forEach((h) => assert.equal(h.length, 4));
+  assert.deepEqual(Object.keys(m.strokes).sort(), ['josh', 'jp', 'sam']);
+  scores.sam = fourteen(4); // +14 gross, 10 net
+  let r = computeMatch(m, scores);
+  assert.equal(r.sides[0].strokes, 56 * 3 + 14);
+  assert.equal(r.sides[0].net, 56 * 3 + 14 - 12);
+  assert.equal(r.leader, 1);
+  assert.equal(r.status, 'Won by 2');
+  scores.sam = fourteen(3);
+  scores.josh[1] = 5; // +2 gross, but still 10 under net
+  r = computeMatch(m, scores);
+  assert.equal(r.leader, 0);
+  const b = matchesOf({}, hcpCfg).find((x) => x.roundId === 'qs' && x.type === 'teambirdies');
+  assert.equal(computeMatch(b, scores).leader, null); // no net birdies
+});
+
+test('handicaps don\'t touch skins, birdies or Friday', () => {
+  const scores = { sat: Object.fromEntries(IDS.map((p) => [p, { ...cfg.pars.sat }])) };
+  scores.sat.sam[3] = 3; scores.sat.tate[3] = 3; // par 3: tie, no skin (no net for Sam)
+  const sk = computeSkins(view(scores, hcpCfg), scores, IDS);
+  assert.equal(sk.holes.find((h) => h.roundId === 'sat' && h.hole === 3).winner, null);
+  assert.equal(birdieCounts(view(scores, hcpCfg), scores, IDS).sam.birdies, 0);
 });

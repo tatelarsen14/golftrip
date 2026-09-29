@@ -34,6 +34,7 @@ function withDefaults(saved) {
     moves: saved.tueDraft?.moves || [], times: saved.tueDraft?.times || [],
   };
   config.puttoffs = saved.puttoffs || {};
+  config.hcp = { ...config.hcp, ...(saved.hcp || {}) };
   for (const r of saved.rounds || []) {
     const round = config.rounds.find((d) => d.id === r.id);
     if (!round) continue;
@@ -44,7 +45,7 @@ function withDefaults(saved) {
 
 // Only the setup is saved; pars and formats are fixed. Arrays and full
 // objects every time, so a reset overwrites (Firestore merges nested maps).
-const setupFields = ({ teams = [], draft, tuePicks, tueDraft, rounds, puttoffs = {} }) => JSON.parse(JSON.stringify({
+const setupFields = ({ teams = [], draft, tuePicks, tueDraft, rounds, puttoffs = {}, hcp = {} }) => JSON.parse(JSON.stringify({
   v: DEFAULT_CONFIG.v,
   teams,
   draft: {
@@ -59,6 +60,7 @@ const setupFields = ({ teams = [], draft, tuePicks, tueDraft, rounds, puttoffs =
   },
   rounds: rounds.map((r) => Object.fromEntries(SAVED_ROUND_FIELDS.map((f) => [f, r[f] ?? null]))),
   puttoffs,
+  hcp,
 }));
 
 const newId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;

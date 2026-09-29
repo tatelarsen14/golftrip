@@ -3,6 +3,7 @@ import { PLAYERS, TEAM_COLORS, TRIP, ITINERARY, FLIGHTS, HOLE_HANDICAPS } from '
 import {
   buildMatches, computeMatch, computeStandings, birdieCounts, parFor, scoreMark, rankTeams, resolveConfig,
   TIEBREAKERS, puttoffKey, holesOf, halvesOf, groupRoster, roundPoints, ESCALATING_BACK_POINTS, TEAMSTROKE_POINTS,
+  BIRDIE_POINTS, STROKES_PER_NINE, TEAMSTROKE_STROKES, HCP_BUCKETS, isTeamMatch, netScore,
   matchStreak, birdieStreak, highlights, longestBirdieRun, longestMatchRun, roundTotals,
   captainRound, draftState, computeSkins, settleUp, tueDraftState,
 } from './scoring.js';
@@ -78,6 +79,14 @@ const scoreChoices = (par) => {
   return list;
 };
 const scoreName = (n, par) => (n === 1 ? 'Ace' : SCORE_NAMES[n - par] || '');
+
+// Who's a 3 and who's a 12, for the Format panel.
+function hcpList(config) {
+  return HCP_BUCKETS.map((b) => `${b}s: ${esc(PLAYERS.filter((p) => (config.hcp?.[p.id] ?? HCP_BUCKETS[0]) === b).map((p) => p.name).join(', ') || 'nobody')}`).join(' · ');
+}
+
+// Handicap stroke holes for a player in a match, marked with a dot.
+const strokeDot = '<span class="stk" title="Handicap stroke">●</span>';
 
 const LEGEND = `<div class="legend">
   <span><span class="mk eagle">3</span> Eagle+</span>
@@ -156,8 +165,8 @@ function pendingNote(config, round) {
   const now = round.leaderNow != null ? `<p class="muted">If it ended now: ${esc(teamName(config, round.leaderNow))} would pick.</p>` : '';
   return `<div class="card tbd">
     <div class="tbd-title">${dayName(round)} matchups TBD</div>
-    <p>Once every match through Monday is final, the captain of the team <b>in first</b> sets all four singles matchups.
-      Front 9 matches are worth 1, then opponents swap for the back 9, worth ${ESCALATING_BACK_POINTS}.</p>
+    <p>Once every match through Monday is final, the captains set the front 9 singles matchups Monday night, Presidents Cup style
+      (the trailing team puts a player out first). Front 9 matches are worth 1, then opponents swap for the back 9, also worth ${ESCALATING_BACK_POINTS}.</p>
     ${now}
   </div>`;
 }
@@ -308,14 +317,18 @@ function formatInfo(config) {
       <li><b>Back 9: Singles.</b> 1 v 1 against a player from the other team.</li>
     </ul>
     <p>Partners rotate so you play with each teammate once and face three different opponents. 6 points a day.</p>
-    <p><b>Mon AM · Quicksands.</b> Team stroke play over 14 par 3s. All four scores on each team count; the lower team total wins
-      ${TEAMSTROKE_POINTS} points (tie = 1 each).</p>
-    <p><b>Tuesday · Escalating singles.</b> Monday night the captains set the back 9 matchups (worth ${ESCALATING_BACK_POINTS} each, tie = 1 each)
-      in turn: one puts a player out, the other picks who plays him. The trailing team puts out first, so the team in first answers twice;
-      match 4 is whoever's left. Front 9 singles are worth 1: you play the other guy in your group. 12 points.</p>
+    <p><b>Mon AM · Quicksands.</b> Team stroke play over 14 par 3s. All four net scores on each team count; the lower team total wins
+      ${TEAMSTROKE_POINTS} points (tie = 1 each). Plus ${BIRDIE_POINTS} point for the team with the most birdies (eagles count, gross; tie = ½ each).</p>
+    <p><b>Tuesday · Singles.</b> Monday night the captains set the front 9 matchups in turn: one puts a player out, the other picks who plays him.
+      The trailing team puts out first, so the team in first answers twice; match 4 is whoever's left. On the back 9 you play the other guy
+      in your group. 1 point a nine, ${roundPoints({ format: 'escalating' })} points.</p>
     <p><b>Points:</b> Win = 1 · Tie = ½ · Loss = 0. ${total} points in all, so ${fmtHalf(total / 2 + 0.5)} wins the Cup.
       Level at the end goes to the tiebreakers: there's no shared Cup.</p>
-    <p><b>Max score:</b> triple bogey (par + 3) on every hole. No handicaps.</p>
+    <p><b>Handicaps:</b> everyone plays as a 3 or a 12 (${hcpList(config)}). In the Sat–Mon and Tuesday matches, a 12 gets
+      ${STROKES_PER_NINE} strokes a nine against a 3, one on each of the ${STROKES_PER_NINE} hardest holes of that nine (● on the score screen).
+      Best ball strokes go off the lowest player in the group. 3 v 3 or 12 v 12: no strokes. At Quicksands each 12 takes
+      ${TEAMSTROKE_STROKES} off his total. Friday, skins and birdies are gross. Enter your real score; the app does the math.</p>
+    <p><b>Max score:</b> triple bogey (par + 3) on every hole.</p>
     <p><b>Reading a match:</b> <i>2 UP thru 6</i> = leading by 2 holes after 6. <i>A/S</i> = all square. <i>Dormie</i> = up by
       exactly the holes left. <i>Won 3&2</i> = 3 up with 2 to play.</p>
     <p><b>Skins:</b> every par 3 at the four main courses plus every hole at Quicksands, all 8 players. The outright low score
@@ -323,16 +336,21 @@ function formatInfo(config) {
   </div>`;
 }
 
-// Quicksands: one team-vs-team card with each side's score to par.
+// Quicksands: team-vs-team cards, one for net score to par and one for
+// the birdie point.
 function strokeCard(config, match, res) {
+  const birdies = match.type === 'teambirdies';
   const side = (si) => {
     const s = res.sides[si];
     const t = match.sides[si].team;
     const lead = res.leader === si;
     const lost = res.done && res.leader !== null && !lead;
+    const off = s.strokes - (s.net ?? s.strokes); // handicap strokes taken so far
+    const shown = birdies ? `<div class="bc-names">${s.birdies} 🐦</div><div class="bc-sub">birdie${s.birdies === 1 ? '' : 's'}</div>`
+      : `<div class="bc-names">${fmtToPar(s.toPar)} net</div><div class="bc-sub">${s.strokes} gross${off ? ` · −${off} hcp` : ''}</div>`;
     return `<div class="bc-side ${si ? 'b' : 'a'} ${lead ? 'lead' : 'trail'} ${lost ? 'lost' : ''}" style="--c:${teamColor(t)}">
       <div class="bc-team">${esc(teamName(config, t))}</div>
-      ${s.entered ? `<div class="bc-names">${fmtToPar(s.toPar)}</div><div class="bc-sub">${s.strokes} strokes</div>`
+      ${s.entered ? shown
         : `<div class="bc-names">${match.sides[si].players.map((p) => esc(playerName(p))).join(' / ')}</div>`}
     </div>`;
   };
@@ -340,12 +358,13 @@ function strokeCard(config, match, res) {
   if (!res.projected) {
     status = '<div class="bc-status"><div class="big">–</div><div class="small">Not started</div></div>';
   } else if (res.done) {
-    status = `<div class="bc-status final"><div class="big ${res.leader === null ? 'sm' : ''}">${res.leader === null ? 'Tied' : `By ${res.up}`}</div><div class="small">Final</div></div>`;
+    const big = res.leader === null ? 'Tied' : birdies ? esc(res.status) : `By ${res.up}`;
+    status = `<div class="bc-status final"><div class="big ${res.leader === null ? 'sm' : ''}">${big}</div><div class="small">Final</div></div>`;
   } else if (res.leader === null) {
-    status = `<div class="bc-status"><div class="big">A/S</div><div class="small">Thru ${res.played}</div></div>`;
+    status = `<div class="bc-status"><div class="big">${birdies ? 'Even' : 'A/S'}</div><div class="small">Thru ${res.played}</div></div>`;
   } else {
     status = `<div class="bc-status up ${res.leader === 0 ? 'left' : 'right'}" style="--c:${teamColor(match.sides[res.leader].team)}">
-      <div class="big">${res.up}</div><div class="small">stroke${res.up === 1 ? '' : 's'} up</div></div>`;
+      <div class="big">${birdies ? esc(res.status) : res.up}</div><div class="small">${birdies ? 'birdies' : `stroke${res.up === 1 ? '' : 's'} up`}</div></div>`;
   }
   return `<article class="bc-match">
     <div class="bc-kind"><span>${esc(match.label)}</span><span>${res.done ? 'Final' : res.projected ? `All thru ${res.played}` : ''}</span></div>
@@ -357,7 +376,7 @@ function strokeCard(config, match, res) {
 // up in its team color, the middle box shows the score, and a hole-by-hole
 // strip above shows who won each hole.
 function broadcastCard(config, match, res) {
-  if (match.type === 'teamstroke') return strokeCard(config, match, res);
+  if (isTeamMatch(match)) return strokeCard(config, match, res);
   const color = (si) => teamColor(match.sides[si].team);
   const kind = matchKind(match);
   const streak = !res.done ? matchStreak(res) : null;
@@ -464,10 +483,10 @@ function todayMatchCard(config, standings, round, me) {
       <p class="muted">Straight stroke play. The two low scores are the captains.${r?.done ? ` You shot <b>${r.gross}</b> (${fmtToPar(r.toPar)}).` : r?.thru ? ` You're <b>${fmtToPar(r.toPar)}</b> thru ${r.thru}.` : ''}</p>${go}</div>`;
   }
   if (round.format === 'teamstroke') {
-    const m = standings.matches.find((x) => x.match.roundId === round.id);
+    const ms = standings.matches.filter((x) => x.match.roundId === round.id);
     return `<div class="yours bc-wrap">
-      <div class="bc-top"><span>Your round · ${roundDay(round)}</span><span class="yours-tee">${m.result.projected ? esc(round.course) : `Tee time ${esc(tee || '')}`}</span></div>
-      <div class="yours-body">${strokeCard(config, m.match, m.result)}</div>${go}</div>`;
+      <div class="bc-top"><span>Your round · ${roundDay(round)}</span><span class="yours-tee">${ms[0]?.result.projected ? esc(round.course) : `Tee time ${esc(tee || '')}`}</span></div>
+      <div class="yours-body">${ms.map((m) => strokeCard(config, m.match, m.result)).join('')}</div>${go}</div>`;
   }
   const mine = standings.matches.filter((m) => m.match.roundId === round.id && m.match.group === gi
     && m.match.sides.some((sd) => sd.players.includes(me)));
@@ -600,7 +619,7 @@ function tuePicksCard(config, round) {
   const st = tueDraftState(store.config, L);
   const name = (p) => esc(playerName(p));
   const rows = [0, 1, 2, 3].map((m) => {
-    const b = st.back[m];
+    const b = st.front[m];
     const label = `${esc(round.tees?.[m >> 1] || `Group ${(m >> 1) + 1}`)} · Match ${m + 1}`;
     return `<div class="tp-slot"><span class="tp-label">${label}</span>
       <span>${b ? `${teamDot(0)}${name(b[0])} <span class="vs">v</span> ${teamDot(1)}${name(b[1])}` : '<span class="muted">–</span>'}</span></div>`;
@@ -613,9 +632,9 @@ function tuePicksCard(config, round) {
     : `${audioUnlocked ? '' : room}<button class="btn dr-start" data-action="draft-room-open">🎬 Open the draft room</button>`;
   return `<div class="card tp-card">
     <div class="cr-head"><span>👑 Tuesday matchups</span><span>${td.started ? 'Live' : 'Monday night'}</span></div>
-    <p class="muted">${esc(teamName(config, L))} finished first. The captains set Tuesday's <b>back 9</b> matchups (${ESCALATING_BACK_POINTS} pts each):
+    <p class="muted">${esc(teamName(config, L))} finished first. The captains set Tuesday's <b>front 9</b> matchups (1 pt each):
       ${name(captainOf(config, 1 - L))} puts a player out, ${name(captainOf(config, L))} picks who plays him, then they swap. The leader answers twice;
-      match 4 is whoever's left. Front 9 matchups follow (you play the other guy in your group).</p>
+      match 4 is whoever's left. On the back 9 (1 pt each) you play the other guy in your group.</p>
     ${rows}
     ${action}
   </div>`;
@@ -798,7 +817,7 @@ function renderBoard() {
       <div class="bc-top"><span>Buckle Up · ${esc(FORMAT_LABELS[round.format])}</span>
         ${roundMatches.some((m) => (m.result.played > 0 || m.result.projected) && !m.result.done) ? '<span class="bc-live">LIVE</span>' : ''}</div>
       ${round.format === 'teamstroke'
-        ? `<div class="bc-session"><span>${roundDay(round)} · ${esc(round.course)}</span><span>All four count</span></div>
+        ? `<div class="bc-session"><span>${roundDay(round)} · ${esc(round.course)}</span><span>All four count · net</span></div>
           ${roundMatches.map((m) => strokeCard(config, m.match, m.result)).join('')}`
         : round.groups.map((g, gi) => `
           <div class="bc-session"><span>${roundDay(round)} · ${esc(round.course)}</span><span>${groupTitle(round, gi)}</span></div>
@@ -861,7 +880,7 @@ function segmentLabel(round, hole) {
   const isFront = front.includes(hole);
   if (round.format === 'stroke') return ['Stroke play', 'Captain Round'];
   if (round.format === 'teamstroke') return ['Team stroke', 'Team stroke play'];
-  if (round.format === 'escalating') return isFront ? ['Singles · 1 pt', 'Front 9 singles'] : [`Singles · ${ESCALATING_BACK_POINTS} pts`, 'Back 9 singles'];
+  if (round.format === 'escalating') return isFront ? ['Singles · 1 pt', 'Front 9 singles'] : [`Singles · ${ESCALATING_BACK_POINTS} pt${ESCALATING_BACK_POINTS === 1 ? '' : 's'}`, 'Back 9 singles'];
   return isFront ? ['Best Ball', 'Best ball match'] : ['Singles', 'Singles matches'];
 }
 
@@ -888,10 +907,14 @@ function renderEntry() {
   const par = parFor(config, round.id, hole);
   const [badge, segment] = segmentLabel(round, hole);
 
+  // Holes where someone in this group gets a handicap stroke.
+  const strokeHoles = new Set(buildMatches(config)
+    .filter((m) => m.roundId === round.id && m.group === ui.group)
+    .flatMap((m) => Object.values(m.strokes || {}).flat()));
   const holeBtns = all.map((h) => {
     const complete = players.every((p) => roundScores[p.id]?.[h]);
     const some = players.some((p) => roundScores[p.id]?.[h]);
-    return `<button class="hole ${h === hole ? 'on' : ''} ${complete ? 'full' : some ? 'part' : ''}"
+    return `<button class="hole ${h === hole ? 'on' : ''} ${complete ? 'full' : some ? 'part' : ''} ${strokeHoles.has(h) ? 'sh' : ''}"
       data-action="hole" data-hole="${h}">${h}</button>${h === front[front.length - 1] ? '<span class="turn"></span>' : ''}`;
   }).join('');
 
@@ -900,6 +923,14 @@ function renderEntry() {
     return n >= 2 ? `<span class="streak hot" title="${n} birdies in a row">🐦🔥${n}</span>` : '';
   };
   const canScore = isPlayer();
+  // Handicap strokes on this hole: in the group's matches (Quicksands has
+  // none per hole: 12s just take strokes off the total).
+  const segmentMatches = buildMatches(config)
+    .filter((m) => m.roundId === round.id && (m.group === ui.group || m.group === -1) && m.holes.includes(hole));
+  const getsStroke = new Set(segmentMatches.filter((m) => !isTeamMatch(m))
+    .flatMap((m) => Object.entries(m.strokes || {}).filter(([, hs]) => hs.includes(hole)).map(([pid]) => pid)));
+  const strokeNote = getsStroke.size
+    ? `<div class="stroke-note">${strokeDot} Stroke hole: <b>${[...getsStroke].map((pid) => esc(playerName(pid))).join(' & ')}</b> ${getsStroke.size > 1 ? 'get' : 'gets'} a stroke</div>` : '';
   const rows = players.map((p) => {
     const v = roundScores[p.id]?.[hole];
     const done = all.filter((h) => roundScores[p.id]?.[h]);
@@ -913,15 +944,13 @@ function renderEntry() {
     return `<div class="entry-row">
       <div class="entry-top">
         ${teamDot(p.team)}
-        <div class="entry-name">${esc(playerName(p.id))}${bStreak(p.id)}<small>${total ? `${total} · ${fmtToPar(toPar)}` : ''}</small></div>
+        <div class="entry-name">${esc(playerName(p.id))}${getsStroke.has(p.id) ? ` <span class="stk-tag">${strokeDot} Stroke${v ? ` · net ${v - 1}` : ''}</span>` : ''}${bStreak(p.id)}<small>${total ? `${total} · ${fmtToPar(toPar)}` : ''}</small></div>
         <div class="stepper"><output class="${v ? '' : 'blank'}">${v ? marked(v, par) : '–'}</output></div>
       </div>
       ${quick}
     </div>`;
   }).join('');
 
-  const segmentMatches = buildMatches(config)
-    .filter((m) => m.roundId === round.id && (m.group === ui.group || m.group === -1) && m.holes.includes(hole));
   const skinHole = round.skins === 'all' || (round.skins === 'par3' && par === 3);
   let below = '';
   if (round.format === 'stroke') {
@@ -946,6 +975,7 @@ function renderEntry() {
         <div class="hole-par">Par ${par ?? '–'}${HOLE_HANDICAPS[round.id] ? ` · Hcp ${HOLE_HANDICAPS[round.id][hole - 1]}` : ''}${par ? ` <span class="hole-max">Max ${par + MAX_OVER_PAR}</span>` : ''}</div></div>
         <span class="badge ${isFront ? 'bb' : 'sg'}">${badge}</span>
       </div>
+      ${strokeNote}
       ${rows}
       ${canScore ? '' : `<p class="spectator-note">👀 Spectator view: only players enter scores.${ui.me ? '' : ' <button class="link" data-action="change-me">Are you a player?</button>'}</p>`}
       <div class="nav-row">
@@ -966,8 +996,10 @@ function scorecard(match, res, roundScores, pars) {
     return `<tr><th>${teamDot(side.team)}${esc(playerName(p))}</th>
       ${vals.map((v, i) => {
         const h = res.holes[i];
-        const counted = match.type === 'bestball' && v && v === (side === match.sides[0] ? h.a : h.b);
-        return `<td class="${counted ? 'counted' : ''}">${marked(v, pars?.[match.holes[i]])}</td>`;
+        const hole = match.holes[i];
+        const counted = match.type === 'bestball' && v && netScore(match, p, hole, v) === (side === match.sides[0] ? h.a : h.b);
+        const stroke = match.strokes?.[p]?.includes(hole);
+        return `<td class="${counted ? 'counted' : ''} ${stroke ? 'has-stk' : ''}">${marked(v, pars?.[hole])}${stroke ? strokeDot : ''}</td>`;
       }).join('')}<td class="tot">${tot || ''}</td></tr>`;
   }));
   const status = res.holes.map((h) => {
@@ -1042,7 +1074,7 @@ function renderCards() {
         const res = computeMatch(m, roundScores);
         return `<div class="card sc-card">${matchCard(m, res, { compact: true })}${scorecard(m, res, roundScores, pars)}</div>`;
       }).join('')}`).join('')}
-    <div class="legend"><span><span class="mk counted-swatch">4</span> Counted for best ball</span><span>Max score: triple bogey</span></div>`;
+    <div class="legend"><span><span class="mk counted-swatch">4</span> Counted for best ball</span><span>${strokeDot} Handicap stroke</span><span>Max score: triple bogey</span></div>`;
   }
   return `
     ${roundChips(round.id)}
@@ -1135,6 +1167,14 @@ function renderSetup() {
       <div class="stack">${g.players.map((pid, si) => chip('fri', gi, si, pid)).join('')}</div>
     </div>`).join('')}</div></div>
 
+    <h2>Handicaps</h2>
+    <p class="note">Tap a player to switch him between a 3 and a 12. 12s get ${STROKES_PER_NINE} strokes a nine against 3s in matches, and take ${TEAMSTROKE_STROKES} off at Quicksands. Changes save for everyone right away.</p>
+    <div class="card"><div class="two">${HCP_BUCKETS.map((b) => `<div>
+      <div class="setup-sub">${b}s</div>
+      <div class="stack">${PLAYERS.filter((p) => (config.hcp?.[p.id] ?? HCP_BUCKETS[0]) === b).map((p) => `
+        <button class="player-chip" data-action="hcp-toggle" data-player="${p.id}">${esc(p.name)}</button>`).join('')}</div>
+    </div>`).join('')}</div></div>
+
     <h2>Rounds</h2>
     ${config.rounds.map((r, ri) => {
       const resolved = view.rounds[ri];
@@ -1150,7 +1190,7 @@ function renderSetup() {
         detail = `<div class="singles-line">${tuePairs.length === 4 ? `Matchups set: <b>${tuePairs.map(([x, y]) => `${name(x)} v ${name(y)}`).join(', ')}</b>
           <button class="link" data-action="tue-reset">Reset</button>` : resolved.needsPicks ? (config.tueDraft?.started ? 'Matchup draft is live.' : 'Ready: start the matchups from the Leaderboard.') : 'Set by the captains Monday night.'}</div>`;
       } else if (r.format === 'teamstroke') {
-        detail = `<div class="singles-line">Team stroke play, ${TEAMSTROKE_POINTS} pts. Groups are Gamble Sands' groups.</div>`;
+        detail = `<div class="singles-line">Team stroke play (net), ${TEAMSTROKE_POINTS} pts, plus ${BIRDIE_POINTS} for most birdies. Groups are Gamble Sands' groups.</div>`;
       } else if (r.format === 'stroke') {
         detail = '<div class="singles-line">Captain Round: no points, no skins.</div>';
       }
@@ -1256,6 +1296,11 @@ function highlightText(config, h) {
     case 'captains': return [`🎖️ Your captains: ${esc(playerName(h.captains[0]))} & ${esc(playerName(h.captains[1]))}`,
       `${esc(playerName(h.captains[0]))} picks first · ${esc(roundName(config, h.roundId))}`];
     case 'matchFinal': {
+      if (h.match.type === 'teambirdies') {
+        const tn = (si) => esc(teamName(config, h.match.sides[si].team));
+        if (h.res.leader === null) return [`🐦 ${tn(0)} and ${tn(1)} split the birdie point`, `${esc(roundName(config, h.roundId))} · ${h.res.sides[0].birdies} birdies each`];
+        return [`🐦 ${tn(h.res.leader)} win the birdie point, ${esc(h.res.status)}`, `${esc(roundName(config, h.roundId))} · ${BIRDIE_POINTS} pt`];
+      }
       if (h.match.type === 'teamstroke') {
         const tn = (si) => esc(teamName(config, h.match.sides[si].team));
         if (h.res.leader === null) return [`🤝 ${tn(0)} and ${tn(1)} tie at ${esc(roundName(config, h.roundId))}`, `${TEAMSTROKE_POINTS / 2} pt each`];
@@ -1761,20 +1806,20 @@ function recordCard(pid) {
   </div>`;
 }
 
-// Head to head for one back 9 match, plus the group's front 9 once it's set.
+// Head to head for one front 9 match, plus the group's back 9 once it's set.
 function matchupCard(m, st) {
-  const [x, y] = st.back[m];
+  const [x, y] = st.front[m];
   const side = (pid, t) => {
     const r = recordOf(pid);
     return `<div class="rv-h2h-side" style="--t:${teamColor(t)}"><b>${esc(playerName(pid))}</b><small>${r.pts} pts · ${r.wlh}</small></div>`;
   };
   const g = m >> 1;
-  const other = st.back[g * 2 + (m % 2 ? 0 : 1)];
-  const front = other ? (m % 2 ? [[other[0], y], [x, other[1]]] : [[x, other[1]], [other[0], y]]) : null;
+  const other = st.front[g * 2 + (m % 2 ? 0 : 1)];
+  const back = other ? (m % 2 ? [[other[0], y], [x, other[1]]] : [[x, other[1]], [other[0], y]]) : null;
   return `<div class="rv-card">
-    <div class="rv-card-head"><span>Match ${m + 1} · Back 9</span><span>${ESCALATING_BACK_POINTS} pts · ${teeFor(m)}</span></div>
+    <div class="rv-card-head"><span>Match ${m + 1} · Front 9</span><span>1 pt · ${teeFor(m)}</span></div>
     <div class="rv-h2h">${side(x, 0)}<span class="rv-vs">vs</span>${side(y, 1)}</div>
-    <div class="rv-report"><span>Front 9 (1 pt)</span>${front ? front.map(([a, b2]) => `${esc(playerName(a))} v ${esc(playerName(b2))}`).join(' · ')
+    <div class="rv-report"><span>Back 9 (${ESCALATING_BACK_POINTS} pt${ESCALATING_BACK_POINTS === 1 ? '' : 's'})</span>${back ? back.map(([a, b2]) => `${esc(playerName(a))} v ${esc(playerName(b2))}`).join(' · ')
       : 'Set once the other match in this group is picked.'}</div>
   </div>`;
 }
@@ -1800,18 +1845,18 @@ function tueItem(sc) {
       sub: `${tn(st.leader)} finished first · ${esc(playerName(captainOf(view, st.trail)))} puts out first` };
   }
   if (sc.kind === 'done') {
-    const list = st.back.map((b, m) => `<div class="rv-set-row"><span>${teeFor(m)} · Match ${m + 1}</span>
+    const list = st.front.map((b, m) => `<div class="rv-set-row"><span>${teeFor(m)} · Match ${m + 1}</span>
       <b>${esc(playerName(b[0]))} v ${esc(playerName(b[1]))}</b></div>`).join('');
-    return { title: 'Tuesday is set', sub: `Back 9 matchups · ${ESCALATING_BACK_POINTS} pts each`, color: teamColor(st.leader),
-      body: `<div class="rv-set">${list}<p>Front 9 (1 pt): you play the other guy in your group.</p></div>` };
+    return { title: 'Tuesday is set', sub: 'Front 9 matchups · 1 pt each', color: teamColor(st.leader),
+      body: `<div class="rv-set">${list}<p>Back 9 (${ESCALATING_BACK_POINTS} pt${ESCALATING_BACK_POINTS === 1 ? '' : 's'}): you play the other guy in your group.</p></div>` };
   }
   const m = Math.floor((sc.n - 1) / 2);
   const pid = st.moves[sc.n - 1];
   if (sc.kind === 'out') {
     const t = st.order[m][0];
     return { pid, color: teamColor(t), kicker: `Tuesday matchups · Match ${m + 1}`,
-      line1: `Match ${m + 1}<br>Back 9 · ${ESCALATING_BACK_POINTS} pts`, line2: `<b>${tn(t)}</b> puts out`,
-      pill: `Match ${m + 1} · ${teeFor(m)}`, selects: `${tn(t)} puts out`, sub: `Match ${m + 1} · Back 9 · ${ESCALATING_BACK_POINTS} pts`,
+      line1: `Match ${m + 1}<br>Front 9 · 1 pt`, line2: `<b>${tn(t)}</b> puts out`,
+      pill: `Match ${m + 1} · ${teeFor(m)}`, selects: `${tn(t)} puts out`, sub: `Match ${m + 1} · Front 9 · 1 pt`,
       card: recordCard(pid) };
   }
   const t = st.order[m][1];
@@ -2103,13 +2148,20 @@ function checkForFinishes() {
 
 function matchBanner(m, res) {
   const round = view.rounds.find((r) => r.id === m.roundId);
-  const kind = `${round ? roundDay(round) : ''} · ${m.type === 'teamstroke' ? esc(round?.course || '') : esc(matchKind(m).split(' · ')[0])}`;
+  const kind = `${round ? roundDay(round) : ''} · ${isTeamMatch(m) ? esc(round?.course || '') : esc(matchKind(m).split(' · ')[0])}`;
   const names = (si) => esc(sideLabel(m.sides[si]));
+  if (m.type === 'teambirdies') {
+    if (res.leader === null) return { color: '#6b7568', kicker: `${kind} · Birdie point`, title: 'Split', score: '½ – ½', sub: `${res.sides[0].birdies} birdies each` };
+    return {
+      color: teamColor(m.sides[res.leader].team), kicker: `${kind} · Birdie point`, title: `${names(res.leader)} win`,
+      score: `🐦 ${esc(res.status)}`, sub: `Most birdies · ${BIRDIE_POINTS} point`,
+    };
+  }
   if (m.type === 'teamstroke') {
     if (res.leader === null) return { color: '#6b7568', kicker: kind, title: 'Tied', score: '1 – 1', sub: `${names(0)} and ${names(1)}` };
     return {
       color: teamColor(m.sides[res.leader].team), kicker: kind, title: `${names(res.leader)} win`,
-      score: `By ${res.up}`, sub: `${TEAMSTROKE_POINTS} points`,
+      score: `By ${res.up}`, sub: `Net team total · ${TEAMSTROKE_POINTS} points`,
     };
   }
   if (res.leader === null) {
@@ -2440,6 +2492,15 @@ app.addEventListener('click', async (e) => {
         c.tuePicks = { pairs: [] };
       });
       return;
+    case 'hcp-toggle': {
+      if (!isAdmin()) return;
+      const pid = el.dataset.player;
+      saveSetup((c) => {
+        const cur = c.hcp?.[pid] ?? HCP_BUCKETS[0];
+        c.hcp = { ...c.hcp, [pid]: cur === HCP_BUCKETS[0] ? HCP_BUCKETS[1] : HCP_BUCKETS[0] };
+      });
+      return;
+    }
     case 'team-color': {
       const t = Number(el.dataset.team);
       if (!isAdmin() && ui.me !== captainOf(store.config, t)) return;

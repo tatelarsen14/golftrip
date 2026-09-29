@@ -846,3 +846,14 @@ label.btn.disabled { opacity: .4; }
 .rv-set-row { display: flex; justify-content: space-between; gap: 10px; padding: 9px 12px; background: rgba(255,255,255,.08); border-radius: 10px; margin-top: 6px; font-size: 14px; }
 .rv-set-row span { font: 600 11px Inter, sans-serif; letter-spacing: .08em; text-transform: uppercase; opacity: .7; align-self: center; }
 .rv-set p { font-size: 12px; opacity: .7; text-align: center; margin-top: 10px; }
+
+/* Handicap strokes */
+.stk { color: var(--gold); font-size: .62em; line-height: 1; vertical-align: super; margin-left: 1px; }
+.stk-tag { display: inline-block; font: 700 11px Inter, sans-serif; background: #fbf0d4; color: #8a6414; border-radius: 99px; padding: 1px 7px; vertical-align: 2px; }
+.stk-tag .stk { vertical-align: 1px; font-size: 10px; }
+.stroke-note { background: #fbf0d4; color: #5c440d; border-radius: 10px; padding: 7px 10px; margin: 0 0 10px; font-size: 13px; }
+.stroke-note .stk { vertical-align: 1px; font-size: 11px; }
+.sc td.has-stk { position: relative; }
+.sc td.has-stk .stk { position: absolute; top: 1px; right: 1px; font-size: 8px; vertical-align: 0; }
+.holes .hole.sh { position: relative; }
+.holes .hole.sh::after { content: ''; position: absolute; top: 3px; right: 3px; width: 5px; height: 5px; border-radius: 50%; background: var(--gold); }
