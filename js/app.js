@@ -819,7 +819,7 @@ function renderBoard() {
       || '<p class="empty">The Captain Round is live at the top of the Leaderboard.</p>';
   } else if (round.pending) matchesHtml = round.needsPicks && featureKind === 'tue' ? '<div class="card tbd"><div class="tbd-title">Matchups being set</div><p>See the top of the Leaderboard.</p></div>' : pendingNote(config, round);
   else {
-    matchesHtml = `<div class="bc-wrap">
+    matchesHtml = `${round.format === 'escalating' ? tueReplayCard(round) : ''}<div class="bc-wrap">
       <div class="bc-top"><span>Buckle Up · ${esc(FORMAT_LABELS[round.format])}</span>
         ${roundMatches.some((m) => (m.result.played > 0 || m.result.projected) && !m.result.done) ? '<span class="bc-live">LIVE</span>' : ''}</div>
       ${round.format === 'teamstroke'
@@ -1761,15 +1761,19 @@ function queueReveal(item) {
   if (document.querySelector('.rv-replay')) return;
   const el = document.createElement('div');
   el.className = 'rv rv-replay';
+  el.style.setProperty('--c', item.color || '#16402b');
   document.body.appendChild(el);
   const scene = document.createElement('div');
   scene.className = 'rv-scene';
   el.appendChild(scene);
-  const timers = mountReveal(scene, { ...item, skipIntro: true });
+  const timers = mountReveal(scene, { skipIntro: true, ...item });
+  if (item.skipIntro === false) playTheme();
   el.insertAdjacentHTML('beforeend', '<div class="rv-bar"><span>Replay</span><button class="rv-btn">Close</button></div>');
   el.addEventListener('click', (e) => {
-    if (e.target.closest('.rv-sound')) return;
+    if (e.target.closest('.rv-sound, .vs-sound')) return;
     timers.forEach(clearTimeout);
+    stopThemeLoop();
+    theme().pause();
     el.remove();
   });
 }
@@ -1972,6 +1976,29 @@ function vsScreen(m, st) {
     <div class="vs-tape"><h3>Tale of the tape · the week so far</h3>${rows}</div>
     <div class="vs-forms">${form(a, 0)}${form(b, 1)}</div>
     <div class="vs-notes">${notes}</div></div>`;
+}
+
+// Once Tuesday is set: rewatch each matchup's pick (the answer's reveal,
+// then the VS screen), from the Leaderboard's Tuesday matches.
+function tueReplayCard(round) {
+  if (round.leader == null) return '';
+  const st = tueDraftState(store.config, round.leader);
+  if (!st.done || !store.config.tueDraft?.started) return '';
+  return `<div class="card tp-replay">
+    <div class="cr-head"><span>🎬 Monday night's picks</span><span>Tap to rewatch</span></div>
+    ${st.front.map(([x, y], m) => `<button class="tp-replay-row" data-action="tue-replay" data-m="${m}">
+      <span class="tp-label">${teeFor(m)} · Match ${m + 1}</span>
+      <span>${teamDot(0)}${esc(playerName(x))} <span class="vs">v</span> ${teamDot(1)}${esc(playerName(y))} <b>▶</b></span></button>`).join('')}
+  </div>`;
+}
+
+function tueReplay(m) {
+  const tue = tueRound();
+  if (tue?.leader == null) return;
+  const st = tueDraftState(store.config, tue.leader);
+  if (!st.done) return;
+  const sc = m === 3 ? { kind: 'last2', st } : { kind: 'answer', st, n: m * 2 + 2 };
+  queueReveal({ ...tueItem(sc), skipIntro: false });
 }
 
 // What the room shows during the matchup draft, or null when it isn't on.
@@ -2652,6 +2679,9 @@ app.addEventListener('click', async (e) => {
     case 'draft-stop':
       if (!isAdmin() || !confirm('Put the draft back to "starts later"? Picks made so far stay.')) return;
       saveSetup((c) => { c.draft.started = false; });
+      return;
+    case 'tue-replay':
+      tueReplay(Number(el.dataset.m));
       return;
     case 'replay-reveal': {
       const pid = el.dataset.player;

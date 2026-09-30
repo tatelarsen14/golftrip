@@ -919,3 +919,8 @@ label.btn.disabled { opacity: .4; }
 .vs-pill { left: 14px; transform: none; letter-spacing: .08em; padding: 6px 10px; }
 .vs-sound { position: absolute; top: calc(env(safe-area-inset-top) + 12px); right: 14px; z-index: 4; border: 1px solid rgba(255,255,255,.35);
   background: rgba(7,17,12,.72); color: #f4efe3; border-radius: 99px; padding: 6px 11px; font: 700 12px Inter, sans-serif; }
+.tp-replay { margin-bottom: 12px; }
+.tp-replay-row { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 9px 10px; border: 0; border-radius: 8px;
+  background: var(--cream); margin-top: 6px; font: 600 14px Inter, sans-serif; color: var(--ink); text-align: left; }
+.tp-replay-row b { color: var(--gold); margin-left: 6px; }
+.tp-replay-row:active { background: var(--line); }
