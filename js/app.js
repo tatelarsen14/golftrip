@@ -15,7 +15,7 @@ const ORGANIZER = 'tate';
 const PLAYER_IDS = PLAYERS.map((p) => p.id);
 const SKIN_STAKE = 5;
 // Shown at the bottom of the Trip tab, to check a phone has the latest version.
-const APP_VERSION = 'Sep 30 · 9';
+const APP_VERSION = 'Sep 30 · 10';
 const app = document.getElementById('app');
 
 let store;
@@ -551,23 +551,21 @@ function captainBoard(config) {
       <span class="ms-tot">${r.thru ? (r.done && tb ? `${r.gross}<small>${r.back} in</small>` : r.gross) : ''}</span>
     </div>`;
   }).join('');
-  // The big board: each player's running score to par after every hole.
+  // Below the leaders: a normal scorecard (actual scores, birdies circled,
+  // bogeys squared), with out, in and total.
   const holes = holesOf(cr.round);
+  const [front, back] = halvesOf(cr.round);
   const pars = config.pars?.[cr.round.id] || {};
+  const sum = (hs, get) => hs.reduce((a, h) => a + (get(h) || 0), 0);
+  const cols = (get, sub) => `${front.map((h) => `<td>${get(h)}</td>`).join('')}<td class="ms-sum">${sub(front)}</td>
+    ${back.map((h) => `<td>${get(h)}</td>`).join('')}<td class="ms-sum">${sub(back)}</td><td class="ms-sum">${sub(holes)}</td>`;
   const grid = cr.rows.map((r) => {
     const sc = store.scores[cr.round.id]?.[r.id] || {};
-    let run = 0;
-    let gap = false;
-    const cells = holes.map((h) => {
-      if (gap || !sc[h]) { gap = true; return '<td></td>'; }
-      run += sc[h] - (pars[h] || 0);
-      return `<td>${num(run)}</td>`;
-    }).join('');
-    return `<tr><th>${esc(playerName(r.id).toUpperCase())}</th>${cells}</tr>`;
+    return `<tr><th>${esc(playerName(r.id).toUpperCase())}</th>${cols((h) => marked(sc[h], pars[h]), (hs) => sum(hs, (h) => sc[h]) || '')}</tr>`;
   }).join('');
   const bigBoard = started ? `<div class="ms-big"><table>
-      <tr class="ms-hole"><th>HOLE</th>${holes.map((h) => `<td>${h}</td>`).join('')}</tr>
-      <tr class="ms-parrow"><th>PAR</th>${holes.map((h) => `<td>${pars[h] ?? ''}</td>`).join('')}</tr>
+      <tr class="ms-hole"><th>HOLE</th>${front.map((h) => `<td>${h}</td>`).join('')}<td>OUT</td>${back.map((h) => `<td>${h}</td>`).join('')}<td>IN</td><td>TOT</td></tr>
+      <tr class="ms-parrow"><th>PAR</th>${cols((h) => pars[h] ?? '', (hs) => sum(hs, (h) => pars[h]))}</tr>
       ${grid}</table></div>` : '';
   let puttoff = '';
   if (cr.puttoff && !draft.manual) {
