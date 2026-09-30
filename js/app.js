@@ -15,7 +15,7 @@ const ORGANIZER = 'tate';
 const PLAYER_IDS = PLAYERS.map((p) => p.id);
 const SKIN_STAKE = 5;
 // Shown at the bottom of the Trip tab, to check a phone has the latest version.
-const APP_VERSION = 'Sep 30 · 8';
+const APP_VERSION = 'Sep 30 · 9';
 const app = document.getElementById('app');
 
 let store;
@@ -359,11 +359,16 @@ function strokeCard(config, match, res) {
     return `<div class="bc-side ${si ? 'b' : 'a'} ${lead ? 'lead' : 'trail'} ${lost ? 'lost' : ''}" style="--c:${teamColor(t)}">
       <div class="bc-team">${esc(teamName(config, t))}</div>
       ${s.entered ? shown
-        : `<div class="bc-names">${match.sides[si].players.map((p) => esc(playerName(p))).join(' / ')}</div>`}
+        : !birdies && off ? `<div class="bc-names">${fmtToPar(s.toPar)} net</div><div class="bc-sub">−${off} hcp · not started</div>`
+          : `<div class="bc-names">${match.sides[si].players.map((p) => esc(playerName(p))).join(' / ')}</div>`}
     </div>`;
   };
   let status;
-  if (!res.projected) {
+  if (!res.projected && !birdies && res.leader !== null) {
+    // Quicksands before anyone tees off: the 12s' strokes are already in.
+    status = `<div class="bc-status up ${res.leader === 0 ? 'left' : 'right'}" style="--c:${teamColor(match.sides[res.leader].team)}">
+      <div class="big">${res.up}</div><div class="small">stroke head start</div></div>`;
+  } else if (!res.projected) {
     status = '<div class="bc-status"><div class="big">–</div><div class="small">Not started</div></div>';
   } else if (res.done) {
     const big = res.leader === null ? 'Tied' : birdies ? esc(res.status) : `By ${res.up}`;
