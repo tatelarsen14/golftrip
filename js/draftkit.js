@@ -20,7 +20,7 @@ export const HIGHLIGHTS = {
   brody: { video: 'media/draft/brody.mp4', focus: '8% 50%', song: 'media/draft/songs/brody.m4a' },
   josh: { video: 'media/draft/josh.mp4', focus: '20% 50%', song: 'media/draft/songs/jonah-josh-sam.m4a' },
   sam: { video: 'media/draft/sam.mp4', song: 'media/draft/songs/jonah-josh-sam.m4a' },
-  jp: { video: 'media/draft/jp.mp4' },
+  jp: { video: 'media/draft/jp.mp4', song: 'media/draft/songs/jp.m4a' },
   skyler: { photo: 'media/draft/skyler.jpg', song: 'media/draft/theme.m4a' }, // the Bulls theme, from the top
 };
 
