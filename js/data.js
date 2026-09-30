@@ -65,7 +65,7 @@ export const DEFAULT_CONFIG = {
   holeHcp: HOLE_HANDICAPS, // fixed, from the scorecards (not saved)
   rounds: [
     {
-      id: 'fri', tees: [], date: '2026-10-02', day: 'Fri Oct 2', course: 'Indian Canyon', enabled: true, format: 'stroke',
+      id: 'fri', tees: ['~1:00 PM', '~1:00 PM'], date: '2026-10-02', day: 'Fri Oct 2', course: 'Indian Canyon', enabled: true, format: 'stroke',
       groups: [{ players: ['tate', 'garrett', 'sam'] }, { players: ['jonah', 'josh', 'brody'] }],
     },
     { id: 'sat', tees: ['12:20 PM', '12:30 PM'], date: '2026-10-03', day: 'Sat Oct 3', course: 'Circling Raven', enabled: true, format: 'match', skins: 'par3', groups: ROTATION.sat },
@@ -94,7 +94,7 @@ export const ITINERARY = [
     day: 'Friday', date: 'Oct 2', title: 'Indian Canyon · Spokane',
     items: [
       { icon: '✈️', time: '8:00 AM', text: 'Fly SLC → Spokane (GEG)' },
-      { icon: '⛳', text: 'Captain Round — Indian Canyon', sub: 'Stroke play: the two low scores are the captains' },
+      { icon: '⛳', time: '~1:00 PM', text: 'Captain Round — Indian Canyon', sub: 'Stroke play: the two low scores are the captains · tee time TBD' },
       { icon: '🎯', text: 'The Draft', sub: 'Captains pick the two teams of 4 in the app' },
     ],
     stay: { name: 'Airbnb' },
