@@ -1606,8 +1606,19 @@ function unlockAudio() {
 function playTheme() {
   if (!audioUnlocked) return;
   const a = theme();
+  a.loop = false;
   a.currentTime = 0;
   a.play().catch(() => {});
+}
+// Under the Tuesday VS screen the theme keeps looping until the next move.
+function loopTheme() {
+  if (!audioUnlocked) return;
+  const a = theme();
+  a.loop = true;
+  if (a.paused) a.play().catch(() => {});
+}
+function stopThemeLoop() {
+  if (themeAudio?.loop) { themeAudio.loop = false; themeAudio.pause(); }
 }
 
 const ordinal = (n) => `${n}${[, 'st', 'nd', 'rd'][n % 100 > 10 && n % 100 < 14 ? 0 : n % 10] || 'th'}`;
@@ -1696,7 +1707,7 @@ function mountReveal(el, item) {
       </div>
     </div>
     <div class="rv-flash"></div>
-    ${item.vs ? `<div class="vs-screen">${item.vs}</div>` : ''}`;
+    ${item.vs ? `<div class="vs-screen">${item.vs}<button class="vs-sound">${audioUnlocked ? '🎵' : '🔊 Music'}</button></div>` : ''}`;
   const timers = [];
   const at = (ms, fn) => timers.push(setTimeout(fn, ms));
   const video = el.querySelector('video');
@@ -1717,6 +1728,7 @@ function mountReveal(el, item) {
       at(item.skipIntro ? 0 : 3400, () => {
         el.querySelector('.vs-screen').classList.add('in');
         video?.pause();
+        loopTheme();
         el.querySelectorAll('.vs-screen video').forEach((v) => v.play().catch(() => {}));
       });
     }
@@ -1727,6 +1739,10 @@ function mountReveal(el, item) {
     at(1500, () => el.querySelector('.rv-l2').classList.add('show'));
     at(3200, drop);
   }
+  el.querySelector('.vs-sound')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!audioUnlocked) unlockAudio().then(() => { loopTheme(); e.target.textContent = '🎵'; });
+  });
   el.querySelector('.rv-sound').addEventListener('click', (e) => {
     e.stopPropagation();
     if (!audioUnlocked) unlockAudio().then(() => { playTheme(); e.target.textContent = soundBtn(); });
@@ -1783,6 +1799,7 @@ function draftScene() {
 
 function closeStage() {
   stageTimers.forEach(clearTimeout);
+  stopThemeLoop();
   stageEl?.remove();
   stageEl = null;
   stageKey = null;
@@ -2053,6 +2070,7 @@ function syncStage() {
     else if (sc.kind === 'captains') item = captainReveals()[sc.step];
     else item = pickReveal(sc.n);
     if (!item.title) item = { ...item, skipIntro: !fresh };
+    if (!item.vs) stopThemeLoop();
     stageTimers = mountReveal(stageEl.querySelector('.rv-scene'), item);
     stageEl.style.setProperty('--c', item.color || '#16402b');
     const opener = sc.mode === 'tue' ? sc.kind !== 'done' : sc.kind === 'pick' || sc.step === 0;

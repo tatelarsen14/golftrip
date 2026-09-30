@@ -916,3 +916,6 @@ label.btn.disabled { opacity: .4; }
 .vs-note b { color: #fff; }
 .vs-note.stk { background: rgba(217,173,74,.14); color: #f2dcae; }
 .vs-note.stk > span:first-child { color: #d9ad4a; }
+.vs-pill { left: 14px; transform: none; letter-spacing: .08em; padding: 6px 10px; }
+.vs-sound { position: absolute; top: calc(env(safe-area-inset-top) + 12px); right: 14px; z-index: 4; border: 1px solid rgba(255,255,255,.35);
+  background: rgba(7,17,12,.72); color: #f4efe3; border-radius: 99px; padding: 6px 11px; font: 700 12px Inter, sans-serif; }
