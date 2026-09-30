@@ -2016,7 +2016,7 @@ function mountReveal(el, item) {
   };
   if (item.skipIntro) drop();
   else {
-    // The Captains Reveal gets a drumroll twice as long as a pick's.
+    // The draft (captains and picks) gets a drumroll twice as long.
     const slow = item.slowIntro ? 2 : 1;
     at(400 * slow, () => el.querySelector('.rv-l1').classList.add('show'));
     at(1500 * slow, () => el.querySelector('.rv-l2').classList.add('show'));
@@ -2566,7 +2566,7 @@ function pickReveal(n, { replay = false } = {}) {
   const total = PLAYER_IDS.length - 2;
   const roster = [draft.captains[team], ...draft.picks.slice(0, n + 1).filter((_, i) => i % 2 === team)];
   return {
-    pid, color: draftColor(team), music: !replay, skipIntro: replay,
+    pid, color: draftColor(team), music: !replay, skipIntro: replay, slowIntro: true,
     kicker: `The Buckle Up Draft · Round ${Math.floor(n / 2) + 1}`,
     line1: `With the ${ordinal(n + 1)} pick<br>in the Buckle Up Draft…`,
     line2: `<b>${esc(draftTeamName(team))}</b> selects`,
