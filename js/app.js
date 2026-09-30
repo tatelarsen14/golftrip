@@ -5,7 +5,7 @@ import {
   TIEBREAKERS, puttoffKey, holesOf, halvesOf, groupRoster, roundPoints, ESCALATING_BACK_POINTS, TEAMSTROKE_POINTS,
   BIRDIE_POINTS, STROKES_PER_NINE, TEAMSTROKE_STROKES, HCP_BUCKETS, isTeamMatch, netScore,
   matchStreak, birdieStreak, highlights, longestBirdieRun, longestMatchRun, roundTotals,
-  captainRound, draftState, computeSkins, settleUp, tueDraftState,
+  captainRound, draftState, computeSkins, settleUp, tueDraftState, hardestHoles,
 } from './scoring.js';
 import { SCOUTING, HIGHLIGHTS, DRAFT_THEME } from './draftkit.js';
 
@@ -1695,7 +1695,8 @@ function mountReveal(el, item) {
         ${item.roster ? `<div class="rv-roster">${item.roster}</div>` : ''}
       </div>
     </div>
-    <div class="rv-flash"></div>`;
+    <div class="rv-flash"></div>
+    ${item.vs ? `<div class="vs-screen">${item.vs}</div>` : ''}`;
   const timers = [];
   const at = (ms, fn) => timers.push(setTimeout(fn, ms));
   const video = el.querySelector('video');
@@ -1711,6 +1712,14 @@ function mountReveal(el, item) {
     requestAnimationFrame(() => el.querySelector('.rv-name').classList.add('in'));
     at(item.skipIntro ? 50 : 2600, () => el.querySelector('.rv-card')?.classList.add('in'));
     at(item.skipIntro ? 100 : 3200, () => el.querySelector('.rv-roster')?.classList.add('in'));
+    // Tuesday matchups: after the answer's reveal, flip to the VS screen.
+    if (item.vs) {
+      at(item.skipIntro ? 0 : 3400, () => {
+        el.querySelector('.vs-screen').classList.add('in');
+        video?.pause();
+        el.querySelectorAll('.vs-screen video').forEach((v) => v.play().catch(() => {}));
+      });
+    }
   };
   if (item.skipIntro) drop();
   else {
@@ -1806,22 +1815,140 @@ function recordCard(pid) {
   </div>`;
 }
 
-// Head to head for one front 9 match, plus the group's back 9 once it's set.
-function matchupCard(m, st) {
-  const [x, y] = st.front[m];
-  const side = (pid, t) => {
-    const r = recordOf(pid);
-    return `<div class="rv-h2h-side" style="--t:${teamColor(t)}"><b>${esc(playerName(pid))}</b><small>${r.pts} pts · ${r.wlh}</small></div>`;
+// ---------- Tuesday VS screen ----------
+//
+// After a matchup is set, the room flips to a fight card: both clips split
+// down the middle, a tale of the tape from the week so far, each player's
+// last three rounds (hot or cold), any head to head, and Tuesday's strokes.
+
+// A player's week so far (everything before Tuesday).
+function weekStats(pid) {
+  const standings = computeStandings(view, store.scores);
+  const row = standings.players[pid] || { points: 0, w: 0, l: 0, h: 0 };
+  const tue = tueRound();
+  const earlier = enabledRounds(view).filter((r) => r !== tue);
+  const singles = { w: 0, l: 0, h: 0 };
+  for (const { match, result } of standings.matches) {
+    if (match.type !== 'singles' || match.roundId === tue?.id || !result.done) continue;
+    const si = match.sides.findIndex((sd) => sd.players.includes(pid));
+    if (si < 0) continue;
+    singles[result.leader === null ? 'h' : result.leader === si ? 'w' : 'l']++;
+  }
+  // Full 18-hole rounds (Friday counts for best round; Quicksands is 14 holes).
+  const full = roundTotals(view, store.scores, pid)
+    .filter((r) => r.holes === 18 && earlier.some((e) => e.id === r.roundId));
+  const best = full.reduce((a, r) => (!a || r.gross < a.gross ? r : a), null);
+  const recent = full.filter((r) => view.rounds.find((x) => x.id === r.roundId)?.format === 'match').slice(-3);
+  const trend = recent.length >= 2 ? recent[0].gross - recent[recent.length - 1].gross : 0; // > 0: getting better
+  // Best hole: best score to par anywhere (an ace beats everything).
+  let bestHole = null;
+  for (const r of earlier) {
+    for (const [h, v] of Object.entries(store.scores[r.id]?.[pid] || {})) {
+      const par = parFor(view, r.id, h);
+      if (!par || !v) continue;
+      const d = v === 1 ? -9 : v - par;
+      if (!bestHole || d < bestHole.d) bestHole = { d, hole: h, course: r.course, v, par };
+    }
+  }
+  const birdies = birdieCounts(view, store.scores, PLAYER_IDS)[pid]?.birdies || 0;
+  const skins = computeSkins(view, store.scores, PLAYER_IDS, SKIN_STAKE).holes.filter((h) => h.winner === pid).length;
+  return {
+    pid, points: row.points, wlh: `${row.w}-${row.l}-${row.h}`, wins: row.w,
+    singles, best, recent, trend, bestHole, birdies, skins, hcp: view.hcp?.[pid] ?? HCP_BUCKETS[0],
+    heat: recent.length >= 2 ? (trend >= 3 ? 'hot' : trend <= -3 ? 'cold' : 'steady') : null,
   };
-  const g = m >> 1;
-  const other = st.front[g * 2 + (m % 2 ? 0 : 1)];
-  const back = other ? (m % 2 ? [[other[0], y], [x, other[1]]] : [[x, other[1]], [other[0], y]]) : null;
-  return `<div class="rv-card">
-    <div class="rv-card-head"><span>Match ${m + 1} · Front 9</span><span>1 pt · ${teeFor(m)}</span></div>
-    <div class="rv-h2h">${side(x, 0)}<span class="rv-vs">vs</span>${side(y, 1)}</div>
-    <div class="rv-report"><span>Back 9 (${ESCALATING_BACK_POINTS} pt${ESCALATING_BACK_POINTS === 1 ? '' : 's'})</span>${back ? back.map(([a, b2]) => `${esc(playerName(a))} v ${esc(playerName(b2))}`).join(' · ')
-      : 'Set once the other match in this group is picked.'}</div>
-  </div>`;
+}
+
+// Earlier matches where these two were on opposite sides.
+function headToHead(x, y) {
+  const standings = computeStandings(view, store.scores);
+  const tue = tueRound();
+  return standings.matches.filter(({ match, result }) => match.roundId !== tue?.id && result.done && !isTeamMatch(match)
+    && match.sides.some((sd) => sd.players.includes(x)) && match.sides.some((sd) => sd.players.includes(y))
+    && match.sides.findIndex((sd) => sd.players.includes(x)) !== match.sides.findIndex((sd) => sd.players.includes(y)))
+    .map(({ match, result }) => {
+      const r = view.rounds.find((rr) => rr.id === match.roundId);
+      const kind = match.type === 'bestball' ? 'best ball' : 'singles';
+      const out = result.leader === null ? 'halved'
+        : `<b>${esc(sideLabel(match.sides[result.leader]))} won ${esc(result.status.replace('Won ', ''))}</b>`;
+      return `Met <b>${dayName(r)}</b> in ${kind}: ${out}`;
+    });
+}
+
+function vsScreen(m, st) {
+  const [x, y] = st.front[m];
+  const tue = tueRound();
+  const a = weekStats(x);
+  const b = weekStats(y);
+  const half = (pid, side, t) => {
+    const h = HIGHLIGHTS[pid] || {};
+    const media = h.video ? `<video src="${h.video}" muted playsinline loop preload="auto" style="object-position:${h.focus || '50% 50%'}"></video>`
+      : h.photo ? `<img src="${h.photo}" alt="">` : '';
+    return `<div class="vs-half ${side}" style="--t:${teamColor(t)}">${media}<div class="vs-tint"></div></div>`;
+  };
+  const badge = (s) => (s.heat === 'hot' ? '<span class="vs-badge hot">🔥 On a heater</span>'
+    : s.heat === 'cold' ? '<span class="vs-badge cold">🥶 Cooling off</span>'
+      : s.heat === 'steady' ? '<span class="vs-badge">➖ Steady</span>' : '');
+  const who = (s, side, t) => `<div class="vs-who ${side}">
+    <div class="vs-team">${esc(teamName(view, t))} · ${s.hcp}</div>
+    <div class="vs-name" style="font-size:${[42, 42, 42, 42, 42, 38, 34][playerName(s.pid).length] || 30}px">${esc(playerName(s.pid))}</div>${badge(s)}</div>`;
+  // One stat row; `cmp` > 0 means the left player is better.
+  const row = (label, l, r, cmp) => `<div class="vs-row">
+    <div class="vs-v l ${cmp > 0 ? 'win' : ''}">${l}</div><div class="vs-k">${label}</div><div class="vs-v r ${cmp < 0 ? 'win' : ''}">${r}</div></div>`;
+  const rec = (o) => `${o.w}-${o.l}${o.h ? `-${o.h}` : ''}`;
+  const bestRound = (s) => (s.best ? `${s.best.gross}<small>${esc(s.best.course)}</small>` : '–');
+  const HOLE_NAMES = { '-9': 'Ace', '-3': 'Albatross', '-2': 'Eagle', '-1': 'Birdie', 0: 'Par' };
+  const bestHole = (s) => {
+    if (!s.bestHole) return '–';
+    const name = HOLE_NAMES[s.bestHole.d] || (s.bestHole.d < -3 ? 'Albatross' : `+${s.bestHole.d}`);
+    if (s.bestHole.d === -1) return `Birdie<small>${s.birdies} of them</small>`;
+    return `${name}<small>#${s.bestHole.hole} ${esc(s.bestHole.course)}</small>`;
+  };
+  const skins = (s) => `${s.skins} · $${s.skins * SKIN_STAKE * (PLAYER_IDS.length - 1)}`;
+  const sign = (v) => Math.sign(v);
+  const rows = [
+    row('Points', fmtHalf(a.points), fmtHalf(b.points), sign(a.points - b.points)),
+    row('Record', a.wlh, b.wlh, sign(a.wins - b.wins)),
+    row('Singles', rec(a.singles), rec(b.singles), sign(a.singles.w - a.singles.l - (b.singles.w - b.singles.l))),
+    row('Best round', bestRound(a), bestRound(b), a.best && b.best ? sign(b.best.gross - a.best.gross) : 0),
+    row('Birdies 🐦', a.birdies, b.birdies, sign(a.birdies - b.birdies)),
+    row('Best hole', bestHole(a), bestHole(b), a.bestHole && b.bestHole ? sign(b.bestHole.d - a.bestHole.d) : 0),
+    row('Skins 💰', skins(a), skins(b), sign(a.skins - b.skins)),
+  ].join('');
+  const form = (s, t) => {
+    if (!s.recent.length) return `<div class="vs-form"><div class="vs-flab"><span>${esc(playerName(s.pid))}</span></div><p>No full rounds yet</p></div>`;
+    const lo = Math.min(...s.recent.map((r) => r.gross));
+    const hi = Math.max(...s.recent.map((r) => r.gross));
+    const bars = s.recent.map((r, i) => {
+      const pct = 45 + (hi === lo ? 55 : ((hi - r.gross) / (hi - lo)) * 55);
+      const last = i === s.recent.length - 1;
+      const bg = last && s.heat === 'hot' ? '#e2562b' : last && s.heat === 'cold' ? '#6fb7e6' : teamColor(t);
+      return `<div style="height:${pct}%;background:${bg}"><span>${r.gross}</span></div>`;
+    }).join('');
+    const tr = s.trend > 0 ? `<span class="up">▲ ${s.trend}</span>` : s.trend < 0 ? `<span class="down">▼ ${-s.trend}</span>` : '';
+    return `<div class="vs-form"><div class="vs-flab"><span>${esc(playerName(s.pid))} · last ${s.recent.length}</span>${tr}</div>
+      <div class="vs-bars">${bars}</div>
+      <div class="vs-days">${s.recent.map((r) => `<span>${esc(r.day.split(' ')[0])}</span>`).join('')}</div></div>`;
+  };
+  const meetings = headToHead(x, y);
+  const [front] = halvesOf(tue || { holes: 18 });
+  const hi = a.hcp > b.hcp ? a : b.hcp > a.hcp ? b : null;
+  const holes = hi ? hardestHoles(view, tue?.id, front, STROKES_PER_NINE) : [];
+  const notes = [
+    `<div class="vs-note"><span>🤝</span><span>${meetings.length ? meetings.join('<br>') : 'First meeting this week'}</span></div>`,
+    hi ? `<div class="vs-note stk"><span>●</span><span><b>${esc(playerName(hi.pid))} gets ${STROKES_PER_NINE} strokes</b> on the front: holes ${holes.join(', ').replace(/, (\d+)$/, ' and $1')}</span></div>`
+      : '<div class="vs-note"><span>⚖️</span><span>Straight up, no strokes</span></div>',
+  ].join('');
+  return `<div class="vs-in" style="--t0:${teamColor(0)};--t1:${teamColor(1)}"><div class="vs-split">
+      ${half(x, 'l', 0)}${half(y, 'r', 1)}<div class="vs-slash"></div>
+      <div class="vs-pill">Match ${m + 1} · Front 9 · 1 pt · ${teeFor(m)}</div>
+      <div class="vs-vs">VS</div>
+      ${who(a, 'l', 0)}${who(b, 'r', 1)}
+      <div class="vs-stripe l" style="background:${teamColor(0)}"></div><div class="vs-stripe r" style="background:${teamColor(1)}"></div>
+    </div>
+    <div class="vs-tape"><h3>Tale of the tape · the week so far</h3>${rows}</div>
+    <div class="vs-forms">${form(a, 0)}${form(b, 1)}</div>
+    <div class="vs-notes">${notes}</div></div>`;
 }
 
 // What the room shows during the matchup draft, or null when it isn't on.
@@ -1864,7 +1991,7 @@ function tueItem(sc) {
   return { pid, color: teamColor(t), kicker: `Tuesday matchups · Match ${m + 1}`,
     line1: `Who's got<br>${esc(playerName(out))}?`, line2: `<b>${tn(t)}</b> answers with`,
     pill: `Match ${m + 1} · ${teeFor(m)}`, selects: `vs ${esc(playerName(out))}`, sub: `${tn(t)} · Match ${m + 1}`,
-    card: matchupCard(m, st) };
+    card: '', vs: vsScreen(m, st) };
 }
 
 // A captain's move in the matchup draft, checked against the latest saved

@@ -65,7 +65,9 @@ opens the draft room for the **matchup draft**. The captains set the front 9 mat
 The trailing team puts out first (matches 1 and 3), so the team in first answers twice;
 match 4 is whoever's left. Matches 1-2 are the 9:20 group, 3-4 the 9:30 group, and the
 back 9 (worth 1) is the other opponent in your group. Every move shows on every phone with
-the player's clip and his Sat–Mon record. 8 points. Tate can reset it in Setup.
+the player's clip and his Sat–Mon record; once a matchup is set, every phone flips to a VS screen: both clips
+split down the middle, a tale of the tape for the week (points, record, singles, best round, birdies, best hole,
+skins), each player's last 3 rounds (🔥 hot or 🥶 cold), any head to head, and who gets strokes. 8 points. Tate can reset it in Setup.
 
 ### Tiebreakers
 
