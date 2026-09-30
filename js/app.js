@@ -14,6 +14,8 @@ const UI_KEY = 'golftrip:ui';
 const ORGANIZER = 'tate';
 const PLAYER_IDS = PLAYERS.map((p) => p.id);
 const SKIN_STAKE = 5;
+// Shown at the bottom of the Trip tab, to check a phone has the latest version.
+const APP_VERSION = 'Sep 30 · 7';
 const app = document.getElementById('app');
 
 let store;
@@ -1400,7 +1402,8 @@ function renderTrip() {
         </ul>
       </article>`).join('')}
     <h2>Flights</h2>
-    <div class="card">${FLIGHTS.map((f) => `<div class="kv"><b>✈️ ${f.route}</b><span>${f.when}</span></div>`).join('')}</div>`;
+    <div class="card">${FLIGHTS.map((f) => `<div class="kv"><b>✈️ ${f.route}</b><span>${f.when}</span></div>`).join('')}</div>
+    <p class="app-version">App version ${APP_VERSION}</p>`;
 }
 
 // ---------- Setup ----------

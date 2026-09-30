@@ -1,0 +1,6 @@
+# Always check for a new version of the app's code (cheap: unchanged files
+# come back as "not modified"); clips, songs and photos can be cached.
+/*
+  Cache-Control: no-cache
+/media/*
+  Cache-Control: public, max-age=86400

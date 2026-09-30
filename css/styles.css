@@ -1024,3 +1024,4 @@ label.btn.disabled { opacity: .4; }
 .ms-big .ms-parrow td, .ms-big .ms-parrow th { font: 600 11px Inter, sans-serif; color: #0f4a2c; background: #efece1; }
 .ms-sub { margin: 8px 12px 0; font-size: 12px; color: #cfe0d4; }
 .cr-card.masters .tie-step { margin: 10px 8px 0; background: #fbfaf5; color: #1d241f; border-radius: 6px; padding: 10px; }
+.app-version { text-align: center; font-size: 11px; color: var(--muted); margin: 18px 0 4px; }
