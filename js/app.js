@@ -55,6 +55,12 @@ const teamName = (config, idx) => config.teams?.[idx]?.name || `Team ${idx + 1}`
 const captainOf = (config, idx) => config.teams?.[idx]?.players[0];
 // Points with a ½ glyph, like a Cup scoreboard: 7.5 -> 7½.
 const fmtHalf = (n) => (Number.isInteger(n) ? String(n) : `${Math.floor(n) || ''}½`);
+// Player points can be quarters (Quicksands points are split four ways).
+const fmtQuarter = (n) => {
+  const whole = Math.floor(n + 1e-9);
+  const frac = { 25: '¼', 50: '½', 75: '¾' }[Math.round((n - whole) * 100)] || '';
+  return `${whole || (frac ? '' : '0')}${frac}`;
+};
 const fmtPts = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, ''));
 const fmtToPar = (n) => (n === 0 ? 'E' : n > 0 ? `+${n}` : String(n));
 const fmtMoney = (n) => (n === 0 ? '$0' : n > 0 ? `+$${n}` : `−$${-n}`);
@@ -1815,7 +1821,7 @@ const teeFor = (m) => esc(tueRound()?.tees?.[m >> 1] || `Group ${(m >> 1) + 1}`)
 function recordOf(pid) {
   const standings = computeStandings(view, store.scores);
   const r = standings.players[pid] || { points: 0, w: 0, l: 0, h: 0 };
-  return { pts: fmtHalf(r.points), wlh: `${r.w}-${r.l}-${r.h}` };
+  return { pts: fmtQuarter(r.points), wlh: `${r.w}-${r.l}-${r.h}` };
 }
 
 function recordCard(pid) {
@@ -1924,7 +1930,7 @@ function vsScreen(m, st) {
   const skins = (s) => `${s.skins} · $${s.skins * SKIN_STAKE * (PLAYER_IDS.length - 1)}`;
   const sign = (v) => Math.sign(v);
   const rows = [
-    row('Points', fmtHalf(a.points), fmtHalf(b.points), sign(a.points - b.points)),
+    row('Points', fmtQuarter(a.points), fmtQuarter(b.points), sign(a.points - b.points)),
     row('Record', a.wlh, b.wlh, sign(a.wins - b.wins)),
     row('Singles', rec(a.singles), rec(b.singles), sign(a.singles.w - a.singles.l - (b.singles.w - b.singles.l))),
     row('Best round', bestRound(a), bestRound(b), a.best && b.best ? sign(b.best.gross - a.best.gross) : 0),
@@ -1977,8 +1983,31 @@ function tueScene() {
   const n = st.moves.length;
   const at = (i) => td.times?.[i] || td.startedAt;
   if (n === 0) return { mode: 'tue', key: `tm:${td.startedAt}:0`, kind: 'start', st, startAt: td.startedAt };
-  if (st.done && Date.now() - at(n - 1) >= 12000) return { mode: 'tue', key: `tm:${td.startedAt}:done`, kind: 'done', st, startAt: at(n - 1) + 12000 };
-  return { mode: 'tue', key: `tm:${td.startedAt}:${n}`, kind: n % 2 ? 'out' : 'answer', st, n, startAt: at(n - 1), tick: st.done };
+  // After match 3 the room holds until Tate taps Next, then match 4 (the
+  // last two) gets its reveal and VS screen, and holds again for the wrap-up.
+  if (st.done) {
+    const next = td.next || [];
+    if (next.length >= 2) return { mode: 'tue', key: `tm:${td.startedAt}:done`, kind: 'done', st, startAt: next[1] };
+    if (next.length === 1) {
+      const second = Date.now() - next[0] >= LAST_STEP_MS;
+      return { mode: 'tue', key: `tm:${td.startedAt}:m4${second ? 'b' : 'a'}`, kind: second ? 'last2' : 'last1', st,
+        startAt: second ? next[0] + LAST_STEP_MS : next[0], tick: !second, waitNext: second };
+    }
+    return { mode: 'tue', key: `tm:${td.startedAt}:${n}`, kind: 'answer', st, n, startAt: at(n - 1), waitNext: true };
+  }
+  return { mode: 'tue', key: `tm:${td.startedAt}:${n}`, kind: n % 2 ? 'out' : 'answer', st, n, startAt: at(n - 1) };
+}
+const LAST_STEP_MS = 9000;
+
+// Tate's Next button after match 3 and match 4.
+function tueNext() {
+  if (!isAdmin()) return;
+  const want = (store.config.tueDraft?.next || []).length;
+  store.updateConfig((c) => {
+    const next = c.tueDraft.next || [];
+    if (!c.tueDraft.started || next.length !== want) throw new Error('taken');
+    c.tueDraft.next = [...next, Date.now()];
+  }).catch((err) => { if (err.message !== 'taken') showError(err); });
 }
 
 function tueItem(sc) {
@@ -1993,6 +2022,19 @@ function tueItem(sc) {
       <b>${esc(playerName(b[0]))} v ${esc(playerName(b[1]))}</b></div>`).join('');
     return { title: 'Tuesday is set', sub: 'Front 9 matchups · 1 pt each', color: teamColor(st.leader),
       body: `<div class="rv-set">${list}<p>Back 9 (${ESCALATING_BACK_POINTS} pt${ESCALATING_BACK_POINTS === 1 ? '' : 's'}): you play the other guy in your group.</p></div>` };
+  }
+  if (sc.kind === 'last1' || sc.kind === 'last2') {
+    // Match 4 is whoever's left, but it still gets the full treatment.
+    const [p1, p2] = [st.front[3][st.leader], st.front[3][st.trail]];
+    const pill = `Match 4 · ${teeFor(3)}`;
+    if (sc.kind === 'last1') {
+      return { pid: p1, color: teamColor(st.leader), kicker: 'Tuesday matchups · Match 4',
+        line1: 'Match 4<br>Last two standing', line2: `<b>${tn(st.leader)}</b> sends out`,
+        pill, selects: `${tn(st.leader)} · last man up`, sub: 'Match 4 · Front 9 · 1 pt', card: recordCard(p1) };
+    }
+    return { pid: p2, color: teamColor(st.trail), kicker: 'Tuesday matchups · Match 4',
+      line1: `Who's got<br>${esc(playerName(p1))}?`, line2: `<b>${tn(st.trail)}</b> answers with`,
+      pill, selects: `vs ${esc(playerName(p1))}`, sub: `${tn(st.trail)} · Match 4`, card: '', vs: vsScreen(3, st) };
   }
   const m = Math.floor((sc.n - 1) / 2);
   const pid = st.moves[sc.n - 1];
@@ -2094,7 +2136,14 @@ function renderStageBar(sc) {
   let pool = [];
   if (sc.mode === 'tue') {
     const turn = sc.st.turn;
-    if (!turn) {
+    const nextDone = (store.config.tueDraft?.next || []).length;
+    if (sc.waitNext) {
+      const label = nextDone ? 'Wrap it up →' : 'Next: match 4 →';
+      html = `<span>${nextDone ? 'Tuesday is set' : 'Up next: match 4'}</span>
+        ${isAdmin() ? `<button class="rv-btn" data-stage="next">${label}</button>` : `<span class="muted">Waiting on Tate</span>${hide}`}`;
+    } else if (sc.kind === 'last1') {
+      html = `<span>Match 4 · <b>last two standing</b></span>${hide}`;
+    } else if (!turn) {
       html = `<span>✅ Tuesday is set</span><button class="rv-btn" data-stage="hide">See the board</button>`;
     } else {
       const cap = captainOf(store.config, turn.team);
@@ -2148,6 +2197,8 @@ function onStageClick(e) {
   } else if (what === 'cancel') {
     pickSheetOpen = false;
     renderStageBar(sc);
+  } else if (what === 'next') {
+    tueNext();
   } else if (what === 'choose') {
     if (sc?.mode === 'tue') makeTueMove(t.dataset.player);
     else makePick(t.dataset.player);
@@ -2670,7 +2721,7 @@ app.addEventListener('click', async (e) => {
       if (!confirm("Start Tuesday's matchups? Every phone opens the draft room.")) return;
       if (!audioUnlocked) unlockAudio();
       store.updateConfig((c) => {
-        c.tueDraft = { started: true, startedAt: Date.now(), moves: [], times: [] };
+        c.tueDraft = { started: true, startedAt: Date.now(), moves: [], times: [], next: [] };
         c.tuePicks = { pairs: [] };
       }).catch(showError);
       return;
@@ -2679,7 +2730,7 @@ app.addEventListener('click', async (e) => {
       if (!confirm("Clear Tuesday's matchups so the captains can set them again?")) return;
       saveSetup((c) => {
         c.tuePicks = { pairs: [] };
-        c.tueDraft = { started: false, startedAt: 0, moves: [], times: [] };
+        c.tueDraft = { started: false, startedAt: 0, moves: [], times: [], next: [] };
       });
       return;
     case 'puttoff': {

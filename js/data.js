@@ -57,7 +57,9 @@ export const DEFAULT_CONFIG = {
   // captains: set by hand to override Friday's scores; picks stay locked until Tate starts the draft.
   draft: { captains: [], picks: [], times: [], at: 0, started: false, startedAt: 0 },
   tuePicks: { pairs: [] }, // Tuesday front 9 matchups: [[team 0 player, team 1 player] x 4]
-  tueDraft: { started: false, startedAt: 0, moves: [], times: [] }, // Monday night matchup draft (see scoring.js)
+  // Monday night matchup draft (see scoring.js); `next` is when Tate tapped Next
+  // after match 3 (match 4's reveal) and after match 4 (the wrap-up).
+  tueDraft: { started: false, startedAt: 0, moves: [], times: [], next: [] },
   puttoffs: {},
   hcp: DEFAULT_HCP,
   holeHcp: HOLE_HANDICAPS, // fixed, from the scorecards (not saved)

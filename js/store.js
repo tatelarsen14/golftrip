@@ -31,7 +31,7 @@ function withDefaults(saved) {
   config.tuePicks = { pairs: (saved.tuePicks?.pairs || []).map((x) => (typeof x === 'string' ? x.split('|') : x)) };
   config.tueDraft = {
     started: !!saved.tueDraft?.started, startedAt: saved.tueDraft?.startedAt || 0,
-    moves: saved.tueDraft?.moves || [], times: saved.tueDraft?.times || [],
+    moves: saved.tueDraft?.moves || [], times: saved.tueDraft?.times || [], next: saved.tueDraft?.next || [],
   };
   config.puttoffs = saved.puttoffs || {};
   config.hcp = { ...config.hcp, ...(saved.hcp || {}) };
@@ -56,7 +56,7 @@ const setupFields = ({ teams = [], draft, tuePicks, tueDraft, rounds, puttoffs =
   tuePicks: { pairs: (tuePicks?.pairs || []).map((x) => (Array.isArray(x) ? x.join('|') : x)) },
   tueDraft: {
     started: !!tueDraft?.started, startedAt: tueDraft?.startedAt || 0,
-    moves: tueDraft?.moves || [], times: tueDraft?.times || [],
+    moves: tueDraft?.moves || [], times: tueDraft?.times || [], next: tueDraft?.next || [],
   },
   rounds: rounds.map((r) => Object.fromEntries(SAVED_ROUND_FIELDS.map((f) => [f, r[f] ?? null]))),
   puttoffs,
