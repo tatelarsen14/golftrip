@@ -1994,6 +1994,8 @@ function mountReveal(el, item) {
     video?.play().catch(() => {});
     // Walk-up song on the drop (the theme covers the drumroll).
     if (!item.skipIntro && songFor(item.pid)) playSong(songFor(item.pid));
+    // Captains get a long moment on screen, so their song keeps going.
+    if (!item.skipIntro && item.loopSong) loopTheme();
     if (!item.skipIntro) {
       el.querySelector('.rv-flash').classList.add('go');
       const colors = [item.color || '#16402b', '#d9ad4a', '#f4efe3'];
@@ -2014,9 +2016,11 @@ function mountReveal(el, item) {
   };
   if (item.skipIntro) drop();
   else {
-    at(400, () => el.querySelector('.rv-l1').classList.add('show'));
-    at(1500, () => el.querySelector('.rv-l2').classList.add('show'));
-    at(3200, drop);
+    // The Captains Reveal gets a drumroll twice as long as a pick's.
+    const slow = item.slowIntro ? 2 : 1;
+    at(400 * slow, () => el.querySelector('.rv-l1').classList.add('show'));
+    at(1500 * slow, () => el.querySelector('.rv-l2').classList.add('show'));
+    at(3200 * slow, drop);
   }
   el.querySelector('.vs-sound')?.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -2060,7 +2064,7 @@ function queueReveal(item) {
 // up; a phone that's behind (or reopens the app) jumps to where everyone is.
 // Only the captain on the clock (or Tate) gets a "Make your pick" button.
 
-const CAPTAIN_STEP_MS = 14000;
+const CAPTAIN_STEP_MS = 28000; // each captain's moment (and the "picks first" card)
 let stageEl = null;
 let stageKey = null;
 let stageTimers = [];
@@ -2413,7 +2417,8 @@ function syncStage() {
     else if (sc.kind === 'captains') item = captainReveals()[sc.step];
     else item = pickReveal(sc.n);
     if (!item.title) item = { ...item, skipIntro: !fresh };
-    if (!item.vs) stopThemeLoop();
+    // A looping song ends at the next reveal; a title card lets it play out.
+    if (item.title) { if (audioEl) audioEl.loop = false; } else if (!item.vs) stopThemeLoop();
     stageTimers = mountReveal(stageEl.querySelector('.rv-scene'), item);
     stageEl.style.setProperty('--c', item.color || '#16402b');
     const opener = sc.mode === 'tue' ? sc.kind !== 'done' : sc.kind === 'pick' || sc.step === 0;
@@ -2548,9 +2553,9 @@ function captainReveals() {
   };
   return [
     { pid: c2, color: draftColor(1), kicker: 'The Buckle Up Draft', line1: 'Your Buckle Up<br>captains are…', line2: 'Captain No. 2',
-      pill: 'Captain', selects: 'Captain', sub: sub(c2), music: true, seq: true },
+      pill: 'Captain', selects: 'Captain', sub: sub(c2), music: true, seq: true, slowIntro: true, loopSong: true },
     { pid: c1, color: draftColor(0), kicker: 'The Buckle Up Draft', line1: 'And the medalist…', line2: 'Captain No. 1',
-      pill: draft.manual ? 'Captain' : 'Medalist 🏅', selects: draft.manual ? 'Captain' : 'Medalist 🏅', sub: sub(c1), seq: true },
+      pill: draft.manual ? 'Captain' : 'Medalist 🏅', selects: draft.manual ? 'Captain' : 'Medalist 🏅', sub: sub(c1), seq: true, slowIntro: true, loopSong: true },
     { title: `${esc(playerName(c1))} picks first`, sub: 'The draft is open.', color: draftColor(0), seq: true },
   ];
 }
