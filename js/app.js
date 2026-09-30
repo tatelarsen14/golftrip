@@ -15,7 +15,7 @@ const ORGANIZER = 'tate';
 const PLAYER_IDS = PLAYERS.map((p) => p.id);
 const SKIN_STAKE = 5;
 // Shown at the bottom of the Trip tab, to check a phone has the latest version.
-const APP_VERSION = 'Sep 30 · 7';
+const APP_VERSION = 'Sep 30 · 8';
 const app = document.getElementById('app');
 
 let store;
@@ -1225,8 +1225,12 @@ function renderEntry() {
     .filter((m) => m.roundId === round.id && (m.group === ui.group || m.group === -1) && m.holes.includes(hole));
   const getsStroke = new Set(segmentMatches.filter((m) => !isTeamMatch(m))
     .flatMap((m) => Object.entries(m.strokes || {}).filter(([, hs]) => hs.includes(hole)).map(([pid]) => pid)));
+  // Quicksands: 12s have their strokes off the total from the start, so no stroke holes.
+  const off = segmentMatches.filter((m) => m.allowance).flatMap((m) => Object.keys(m.allowance))
+    .filter((pid) => players.some((p) => p.id === pid));
   const strokeNote = getsStroke.size
-    ? `<div class="stroke-note">${strokeDot} Stroke hole: <b>${[...getsStroke].map((pid) => esc(playerName(pid))).join(' & ')}</b> ${getsStroke.size > 1 ? 'get' : 'gets'} a stroke</div>` : '';
+    ? `<div class="stroke-note">${strokeDot} Stroke hole: <b>${[...getsStroke].map((pid) => esc(playerName(pid))).join(' & ')}</b> ${getsStroke.size > 1 ? 'get' : 'gets'} a stroke</div>`
+    : off.length ? `<div class="stroke-note">${strokeDot} <b>${off.map((pid) => esc(playerName(pid))).join(' & ')}</b>: ${TEAMSTROKE_STROKES} strokes already off ${off.length > 1 ? 'their totals' : 'his total'}. No stroke holes here.</div>` : '';
   const rows = players.map((p) => {
     const v = roundScores[p.id]?.[hole];
     const done = all.filter((h) => roundScores[p.id]?.[h]);

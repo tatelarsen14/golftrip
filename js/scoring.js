@@ -61,14 +61,11 @@ function matchStrokes(config, roundId, holes, players) {
   return out;
 }
 
-// Quicksands has no stroke holes: a 12 just takes TEAMSTROKE_STROKES off his
-// total. So a live total is fair mid-round, they come off evenly spread holes.
-function teamStrokeStrokes(config, holes, players) {
-  const low = HCP_BUCKETS[0];
-  const n = TEAMSTROKE_STROKES;
-  const where = Array.from({ length: n }, (_, i) => holes[Math.min(holes.length - 1, Math.round(((i + 0.5) * holes.length) / n) - 1)]);
+// Quicksands has no stroke holes: each 12 takes TEAMSTROKE_STROKES off his
+// total, counted from the first tee so the live score is net all the way.
+function teamStrokeAllowance(config, players) {
   const out = {};
-  for (const p of players) if (hcpOf(config, p) > low) out[p] = where;
+  for (const p of players) if (hcpOf(config, p) > HCP_BUCKETS[0]) out[p] = TEAMSTROKE_STROKES;
   return out;
 }
 
@@ -95,7 +92,7 @@ export function buildMatches(config) {
       matches.push({
         roundId: round.id, group: -1, id: `${round.id}-team`, type: 'teamstroke', label: `Team stroke play · Net · ${TEAMSTROKE_POINTS} pts`,
         weight: TEAMSTROKE_POINTS, holes, pars: config.pars?.[round.id] || {}, sides,
-        strokes: teamStrokeStrokes(config, holes, sides.flatMap((sd) => sd.players)),
+        strokes: {}, allowance: teamStrokeAllowance(config, sides.flatMap((sd) => sd.players)),
       });
       matches.push({
         roundId: round.id, group: -1, id: `${round.id}-birdies`, type: 'teambirdies', label: `Most birdies · ${BIRDIE_POINTS} pt`,
@@ -146,9 +143,10 @@ export function sideScore(roundScores, players, hole, match = null) {
   return vals.length ? Math.min(...vals) : null;
 }
 
-// Team stroke play: every player's net score counts. Live, teams are
-// compared on net score to par for the holes each player has in (so a group
-// that's further along isn't penalized); final, on net total strokes.
+// Team stroke play: every player's score counts, less each 12's allowance
+// (taken off from the start). Live, teams are compared on net score to par
+// for the holes each player has in (so a group that's further along isn't
+// penalized); final, on net total strokes.
 function computeTeamStroke(match, roundScores) {
   const total = match.holes.length;
   const sides = match.sides.map((side) => {
@@ -163,11 +161,12 @@ function computeTeamStroke(match, roundScores) {
       thru = Math.min(thru, done.length);
       entered += done.length;
       for (const h of done) {
-        const n = netScore(match, p, h, sc[h]);
         strokes += sc[h];
-        net += n;
-        toPar += n - (match.pars[h] || 0);
+        toPar += sc[h] - (match.pars[h] || 0);
       }
+      const off = match.allowance?.[p] || 0;
+      net += done.reduce((a, h) => a + sc[h], 0) - off;
+      toPar -= off;
     }
     return { strokes, net, toPar, entered, thru };
   });

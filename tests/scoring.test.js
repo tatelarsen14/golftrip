@@ -469,8 +469,12 @@ test('handicaps at Quicksands: each 12 takes 4 off his total; birdies stay gross
   const fourteen = (v) => holes(Array(14).fill(v));
   const scores = Object.fromEntries(IDS.map((p) => [p, fourteen(3)]));
   // Team Tate has three 12s (Sam, Josh, JP): 12 strokes off.
-  Object.values(m.strokes).forEach((h) => assert.equal(h.length, 4));
-  assert.deepEqual(Object.keys(m.strokes).sort(), ['josh', 'jp', 'sam']);
+  assert.deepEqual(m.allowance, { sam: 4, josh: 4, jp: 4 });
+  // The strokes are in from the first tee: through one hole at par, Team Tate is 12 under net.
+  const one = Object.fromEntries(IDS.map((p) => [p, { 1: 3 }]));
+  const live = computeMatch(m, one);
+  assert.equal(live.sides[0].toPar, -12);
+  assert.equal(live.leader, 0);
   scores.sam = fourteen(4); // +14 gross, 10 net
   let r = computeMatch(m, scores);
   assert.equal(r.sides[0].strokes, 56 * 3 + 14);
