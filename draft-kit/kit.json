@@ -24,6 +24,7 @@
     "skyler": "players/skyler/photo.jpg"
   },
   "songs": {
-    "tate": "players/tate/song.m4a"
+    "tate": "players/tate/song.m4a",
+    "garrett": "players/garrett/song.m4a"
   }
 }
