@@ -832,6 +832,7 @@ function renderBoard() {
   }
 
   return `
+    ${recapBanner()}
     ${champBanner}
     ${yourMatchCard(config, standings)}
     ${feature}
@@ -866,6 +867,262 @@ function renderBoard() {
       <h2>Birdie Board 🐦</h2>
       ${birdieBoard(config, birdies)}
     </section>`;
+}
+
+// ---------- Nightly recap card ----------
+//
+// Once a day's last match is final, the Leaderboard offers a summary card for
+// the group chat: the Cup, the day's results, stars of the day and tomorrow's
+// tee times and matchups (or, after Tuesday, the champion and settle-up).
+// Tate gets a Share button so it's sent once; everyone else can open it.
+// It goes away once the next round's first score is in.
+
+// The latest day whose rounds are all final, while the next day hasn't started.
+function recapDay() {
+  const rounds = enabledRounds(view);
+  const dates = [...new Set(rounds.map((r) => r.date))].sort();
+  let day = null;
+  for (const date of dates) {
+    if (rounds.filter((r) => r.date === date).every((r) => roundComplete(view, r))) day = date;
+    else break;
+  }
+  if (!day) return null;
+  const started = rounds.some((r) => r.date > day && Object.keys(store.scores[r.id] || {}).length);
+  return started ? null : day;
+}
+const weekday = (date) => new Date(`${date}T12:00`).toLocaleDateString('en-US', { weekday: 'long' });
+
+function recapBanner() {
+  const date = recapDay();
+  if (!date) return '';
+  const what = tripFinal(view, store.scores) ? 'The final recap' : `${weekday(date)}'s recap`;
+  return isAdmin()
+    ? `<button class="card rc-banner" data-action="recap-open"><span>📲 <b>${what} is ready</b></span><span class="rc-go">Share →</span></button>`
+    : `<button class="rc-link" data-action="recap-open">📋 See ${what.replace('The final', 'the final')} →</button>`;
+}
+
+function recapCard(date) {
+  const config = view;
+  const { scores } = store;
+  const rounds = enabledRounds(config);
+  const todays = rounds.filter((r) => r.date === date);
+  const nextDate = rounds.map((r) => r.date).filter((d) => d > date).sort()[0];
+  const tomorrow = rounds.filter((r) => r.date === nextDate);
+  const final = tripFinal(config, scores);
+  const standings = computeStandings(config, scores);
+  const hasTeams = config.teams.length === 2;
+  const name = (p) => esc(playerName(p));
+  const dot = (t) => `<span class="rc-dot" style="background:${teamColor(t)}"></span>`;
+  const courses = todays.map((r) => esc(r.course)).join(' + ');
+  const friday = todays.every((r) => r.format === 'stroke');
+
+  // ---- Top: the Cup (or Friday's captains) ----
+  let top;
+  if (friday || !hasTeams) {
+    const caps = draft.captains || [];
+    top = `<div class="rc-title">${weekday(date)} final · ${courses}</div>
+      <div class="rc-caps">${caps.length === 2 ? `🎖️ Captains: <b>${name(caps[0])}</b> (picks first) &amp; <b>${name(caps[1])}</b>` : 'Captains TBD'}</div>`;
+  } else {
+    const scoring = rounds.filter((r) => r.format !== 'stroke');
+    const total = scoring.reduce((a, r) => a + roundPoints(r), 0);
+    const pts = standings.teams.map((t) => t.points);
+    const today = [0, 0];
+    standings.matches.filter(({ match, result }) => todays.some((r) => r.id === match.roundId) && result.points)
+      .forEach(({ match, result }) => match.sides.forEach((sd, si) => { today[sd.team] += result.points[si]; }));
+    const left = total - pts[0] - pts[1];
+    const lead = pts[0] > pts[1] ? 0 : pts[1] > pts[0] ? 1 : -1;
+    let title = `${weekday(date)} final · ${courses}`;
+    let champ = '';
+    if (final) {
+      const { ranked } = rankTeams(config, scores, scoring.map((r) => r.id), 'final');
+      title = `Final · ${courses}`;
+      if (!ranked[0].unresolved) champ = `<div class="rc-champ">🏆 ${esc(teamName(config, ranked[0].idx))} win the Cup</div>`;
+    }
+    const side = (t, r) => `<div class="rc-team ${r ? 'r' : ''} ${lead === t ? 'lead' : ''}">
+      <span class="rc-tn">${esc(teamName(config, t))}</span><span class="rc-tp">${fmtHalf(pts[t])}</span></div>`;
+    top = `<div class="rc-title">${title}</div>${champ}
+      <div class="rc-cup">${side(0, false)}<div class="rc-mid">The Cup</div>${side(1, true)}</div>
+      <div class="rc-bar"><i style="left:0;width:${(pts[0] / total) * 100}%;background:${teamColor(0)}"></i><i style="right:0;width:${(pts[1] / total) * 100}%;background:${teamColor(1)}"></i></div>
+      <div class="rc-sub"><span>Today ${fmtHalf(today[0])}</span><span>${final ? `${total} points` : `${fmtHalf(total / 2 + 0.5)} to win · ${fmtHalf(left)} left`}</span><span>Today ${fmtHalf(today[1])}</span></div>`;
+  }
+
+  // ---- Today's results ----
+  let results = '';
+  if (friday) {
+    const cr = draft.cr;
+    const rows = (cr?.rows || []).map((r) => `<div class="rc-row"><span class="rc-kind">${r.rank}</span>
+      <span>${(draft.captains || []).includes(r.id) ? '🎖️ ' : ''}<b>${name(r.id)}</b></span>
+      <span class="rc-pill plain">${r.gross} <small>${fmtToPar(r.toPar)}</small></span></div>`).join('');
+    results = `<div class="rc-sec"><div class="rc-h">Captain Round <small>Stroke play</small></div><div class="rc-box">${rows}</div></div>`;
+    if (hasTeams) {
+      results += `<div class="rc-sec"><div class="rc-h">The teams</div><div class="rc-teams">${config.teams.map((t, i) => `
+        <div class="rc-box rc-roster" style="--t:${teamColor(i)}"><b>${esc(t.name)}</b>${t.players.map((p, j) => `<span>${j ? '' : '🎖️ '}${name(p)}</span>`).join('')}</div>`).join('')}</div></div>`;
+    }
+  } else {
+    const row = ({ match, result: res }) => {
+      const kind = { bestball: 'Best ball', teamstroke: 'Net total', teambirdies: 'Birdies' }[match.type]
+        || (match.label?.includes('Front') ? 'Front 9' : match.label?.includes('Back') ? 'Back 9' : 'Singles');
+      const lab = (si) => esc(sideLabel(match.sides[si]));
+      if (res.leader === null) {
+        const word = match.type === 'teambirdies' ? 'split it' : match.type === 'teamstroke' ? 'tied' : 'halved';
+        return `<div class="rc-row"><span class="rc-kind">${kind}</span><span><b>${lab(0)}</b> <i>and</i> <b>${lab(1)}</b> <i>${word}</i></span><span class="rc-pill h">${match.type === 'teambirdies' ? '½–½' : 'A/S'}</span></div>`;
+      }
+      const w = res.leader;
+      const pill = match.type === 'teamstroke' ? `By ${res.up}` : match.type === 'teambirdies' ? esc(res.status) : esc(res.status.replace('Won ', ''));
+      return `<div class="rc-row"><span class="rc-kind">${kind}</span><span>${dot(match.sides[w].team)}<b>${lab(w)}</b> <i>def. ${lab(1 - w)}</i></span>
+        <span class="rc-pill" style="background:${teamColor(match.sides[w].team)}">${pill}</span></div>`;
+    };
+    const blocks = todays.map((r) => {
+      const ms = standings.matches.filter((m) => m.match.roundId === r.id);
+      const pre = todays.length > 1 ? `${esc(r.course)} · ` : '';
+      if (r.format === 'teamstroke') return `<div class="rc-grp">${pre}All 8 · ${roundPoints(r)} pts</div>${ms.map(row).join('')}`;
+      return r.groups.map((g, gi) => `<div class="rc-grp">${pre}Group ${gi + 1}${r.tees?.[gi] ? ` · ${esc(r.tees[gi].replace(' PM', '').replace(' AM', ''))}` : ''}</div>
+        ${ms.filter((m) => m.match.group === gi).map(row).join('')}`).join('');
+    }).join('');
+    const pts = todays.reduce((a, r) => a + roundPoints(r), 0);
+    results = `<div class="rc-sec"><div class="rc-h">${final ? "Tuesday's matches" : "Today's matches"} <small>${pts} points</small></div><div class="rc-box">${blocks}</div></div>`;
+
+    // ---- Stars of the day ----
+    const ids = PLAYER_IDS;
+    const full = ids.flatMap((p) => todays.filter((r) => r.format !== 'teamstroke')
+      .map((r) => ({ p, ...roundTotals(config, scores, p).find((x) => x.roundId === r.id) }))).filter((x) => x.holes === 18);
+    const low = full.length ? Math.min(...full.map((x) => x.gross)) : null;
+    const lowWho = [...new Set(full.filter((x) => x.gross === low).map((x) => x.p))];
+    const birds = {};
+    for (const r of todays) {
+      for (const [p, holes] of Object.entries(scores[r.id] || {})) {
+        for (const [h, v] of Object.entries(holes)) {
+          const par = parFor(config, r.id, h);
+          if (par && v < par) (birds[p] ||= []).push(`${v === 1 ? 'ace ' : par - v >= 2 ? 'eagle ' : ''}#${h}`);
+        }
+      }
+    }
+    const birdTotal = Object.values(birds).reduce((a, l) => a + l.length, 0);
+    const birdList = Object.entries(birds).sort((a, b) => b[1].length - a[1].length).slice(0, 3)
+      .map(([p, l]) => (l.length === 1 ? `${name(p)} ${l[0]}` : `${name(p)} ×${l.length}`)).join(' · ');
+    const skinsWon = computeSkins(config, scores, ids, SKIN_STAKE).holes.filter((h) => h.winner && todays.some((r) => r.id === h.roundId));
+    const done = standings.matches.filter((m) => todays.some((r) => r.id === m.match.roundId) && !isTeamMatch(m.match) && m.result.done);
+    const close = done.filter((m) => m.result.leader === null || (m.result.up === 1 && m.result.remaining === 0));
+    const big = done.filter((m) => m.result.leader !== null).sort((a, b) => b.result.up - a.result.up)[0];
+    const star = (k, v, d, cls = '') => `<div class="rc-star"><div class="rc-k">${k}</div><div class="rc-v ${cls}">${v}</div><div class="rc-d">${d}</div></div>`;
+    const fourth = close.length
+      ? star('Closest finish', `${close.length} went to 18`, close.slice(0, 2).map((m) => `${esc(sideLabel(m.match.sides[0]))} v ${esc(sideLabel(m.match.sides[1]))}`).join(' · '))
+      : big ? star('Biggest win', esc(big.result.status.replace('Won ', '')), esc(sideLabel(big.match.sides[big.result.leader]))) : '';
+    results += `<div class="rc-sec"><div class="rc-h">Stars of the day</div><div class="rc-stars">
+      ${low !== null ? star('Low round', low, lowWho.map(name).join(', ')) : ''}
+      ${star('Birdies 🐦', birdTotal, birdTotal ? birdList : 'None. Ice cold 🥶', 'red')}
+      ${star('Skins 💰', `${skinsWon.length} won`, skinsWon.length ? `${skinsWon.slice(0, 4).map((h) => `${name(h.winner)} #${h.hole}`).join(' · ')} · $${SKIN_STAKE * (ids.length - 1)} each` : 'All pushed')}
+      ${fourth}
+    </div></div>`;
+  }
+
+  // ---- Tomorrow, or the wrap-up after Tuesday ----
+  let next = '';
+  const strokeLine = (ms) => {
+    const by = {};
+    ms.filter((m) => !isTeamMatch(m)).forEach((m) => Object.entries(m.strokes || {}).forEach(([p, hs]) => { (by[p] ||= new Set()); hs.forEach((h) => by[p].add(h)); }));
+    const list = Object.entries(by).map(([p, hs]) => `${name(p)} ${[...hs].sort((a, b) => a - b).join(', ')}`);
+    return `<div class="rc-stk">${list.length ? `● Strokes: ${list.join(' · ')}` : 'No strokes: straight up'}</div>`;
+  };
+  if (tomorrow.length) {
+    const all = buildMatches(config);
+    const blocks = tomorrow.map((r) => {
+      const head = `<div class="rc-nt"><b>${esc(r.course)} · ${roundDay(r)}</b><span>${r.tees?.length ? `First tee ${esc(r.tees[0])}` : ''}</span></div>`;
+      if (r.pending) {
+        const why = r.waitingOn === 'draft' ? "Teams set by tonight's draft"
+          : r.needsPicks ? `Matchups set tonight · ${esc(teamName(config, r.leader))} finished first` : 'Matchups TBD';
+        return `${head}<div class="rc-ng"><div class="rc-m">${why}</div></div>`;
+      }
+      if (r.format === 'teamstroke') {
+        return `${head}<div class="rc-ng"><div class="rc-m">Team stroke play, all 8 count (12s take ${TEAMSTROKE_STROKES} off) + the birdie point</div>
+          ${r.groups.map((g, gi) => `<div class="rc-m"><span class="rc-kk">${esc(r.tees?.[gi] || `Group ${gi + 1}`)}</span><span>${groupPlayers(config, g).map((p) => name(p.id)).join(', ')}</span></div>`).join('')}</div>`;
+      }
+      return head + r.groups.map((g, gi) => {
+        const ms = all.filter((m) => m.roundId === r.id && m.group === gi);
+        const vs = (m) => `${m.sides[0].players.map(name).join(' &amp; ')} v ${m.sides[1].players.map(name).join(' &amp; ')}`;
+        const lines = r.format === 'escalating'
+          ? `<div class="rc-m"><span class="rc-kk">Front 9</span><span>${ms.filter((m) => m.holes[0] === 1).map(vs).join(' · ')}</span></div>
+             <div class="rc-m"><span class="rc-kk">Back 9</span><span>${ms.filter((m) => m.holes[0] !== 1).map(vs).join(' · ')}</span></div>`
+          : `<div class="rc-m"><span class="rc-kk">Best ball</span><span>${ms.filter((m) => m.type === 'bestball').map(vs).join('')}</span></div>
+             <div class="rc-m"><span class="rc-kk">Singles</span><span>${ms.filter((m) => m.type === 'singles').map(vs).join(' · ')}</span></div>`;
+        return `<div class="rc-ng"><div class="rc-tee">${esc(r.tees?.[gi] || '')} · Group ${gi + 1}</div>${lines}${strokeLine(ms)}</div>`;
+      }).join('');
+    }).join('');
+    next = `<div class="rc-sec"><div class="rc-h">Tomorrow</div><div class="rc-next">${blocks}</div></div>`;
+  } else if (final) {
+    const birdies = birdieCounts(config, scores, PLAYER_IDS);
+    const top = (val) => {
+      const best = Math.max(...PLAYER_IDS.map(val));
+      return { best, who: PLAYER_IDS.filter((p) => val(p) === best).map(name).join(', ') };
+    };
+    const mvp = top((p) => standings.players[p]?.points || 0);
+    const bk = top((p) => birdies[p]?.birdies || 0);
+    const { net } = computeSkins(config, scores, PLAYER_IDS, SKIN_STAKE);
+    const sk = top((p) => net[p]);
+    const pay = settleUp(net);
+    next = `<div class="rc-sec"><div class="rc-h">The week</div><div class="rc-stars">
+        <div class="rc-star"><div class="rc-k">MVP</div><div class="rc-v">${fmtQuarter(mvp.best)} pts</div><div class="rc-d">${mvp.who}</div></div>
+        <div class="rc-star"><div class="rc-k">Birdie king 🐦</div><div class="rc-v red">${bk.best}</div><div class="rc-d">${bk.who}</div></div>
+      </div></div>
+      <div class="rc-sec"><div class="rc-h">Skins settle-up 💰 <small>${sk.best > 0 ? `Top: ${sk.who} +$${sk.best}` : ''}</small></div>
+        <div class="rc-next"><div class="rc-ng">${pay.length ? pay.map((x) => `<div class="rc-m">${name(x.from)} → ${name(x.to)} <b class="rc-amt">$${x.amount}</b></div>`).join('') : '<div class="rc-m">Nobody owes anybody</div>'}</div></div></div>`;
+  }
+
+  return `<div class="rc-top"><div class="rc-brand"><b>BUCKLE UP</b><span>${esc(TRIP.short)} · ${esc(TRIP.shortDates)}</span></div>${top}</div>
+    ${results}${next}
+    <div class="rc-foot"><span>${esc(location.host)}</span><span>Full scores in the app</span></div>`;
+}
+
+let html2canvasLoad;
+function loadHtml2canvas() {
+  html2canvasLoad ||= new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+    s.onload = () => resolve(window.html2canvas);
+    s.onerror = () => { html2canvasLoad = null; reject(new Error("Couldn't load the image maker. Check your signal and try again.")); };
+    document.head.appendChild(s);
+  });
+  return html2canvasLoad;
+}
+
+function openRecap() {
+  const date = recapDay();
+  if (!date || document.querySelector('.rc-overlay')) return;
+  const el = document.createElement('div');
+  el.className = 'rc-overlay';
+  el.innerHTML = `<div class="rc-scroll"><div class="rc-card">${recapCard(date)}</div><p class="rc-hint" hidden></p></div>
+    <div class="rc-actions">${isAdmin() ? '<button class="btn rc-share">📲 Share</button>' : ''}<button class="btn ghost rc-close">Close</button></div>`;
+  document.body.appendChild(el);
+  el.querySelector('.rc-close').addEventListener('click', () => el.remove());
+  el.querySelector('.rc-share')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = 'Making the image…';
+    try {
+      const h2c = await loadHtml2canvas();
+      const card = el.querySelector('.rc-card');
+      const canvas = await h2c(card, { scale: 3, backgroundColor: '#f4efe3', useCORS: true, logging: false });
+      const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'));
+      const file = new File([blob], `buckle-up-${date}.png`, { type: 'image/png' });
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file] }).catch((err) => { if (err.name !== 'AbortError') throw err; });
+      } else {
+        // No share sheet: show the image so it can be saved with a long press.
+        const img = new Image();
+        img.src = canvas.toDataURL('image/png');
+        img.className = 'rc-img';
+        card.replaceWith(img);
+        const hint = el.querySelector('.rc-hint');
+        hint.hidden = false;
+        hint.textContent = 'Press and hold the image to save or share it.';
+      }
+    } catch (err) {
+      showError(err);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '📲 Share';
+    }
+  });
 }
 
 // ---------- Score entry ----------
@@ -2696,6 +2953,9 @@ app.addEventListener('click', async (e) => {
     case 'draft-stop':
       if (!isAdmin() || !confirm('Put the draft back to "starts later"? Picks made so far stay.')) return;
       saveSetup((c) => { c.draft.started = false; });
+      return;
+    case 'recap-open':
+      openRecap();
       return;
     case 'tue-replay':
       tueReplay(Number(el.dataset.m));
