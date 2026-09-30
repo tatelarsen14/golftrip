@@ -433,14 +433,19 @@ function yourMatchCard(config, standings) {
   const todayCard = todayRound && me ? todayMatchCard(config, standings, todayRound, me) : '';
   if (todayCard) return todayCard;
 
-  const next = rounds.find((r) => r.date > today && r.format !== 'stroke');
+  // Friday's players count down to the Captain Round; everyone else to Saturday.
+  const next = rounds.find((r) => r.date > today
+    && (r.format !== 'stroke' || (me && r.groups.some((g) => inGroup(config, g, me)))));
   if (!next) return '';
   const days = daysUntil(next.date);
   const beforeTrip = today < rounds[0].date;
   const when = days === 1 ? 'Tomorrow' : beforeTrip ? `${days} days to tee off` : `${dayName(next)} · in ${days} days`;
   let sub = '';
   const gi = me && !next.pending ? next.groups.findIndex((g) => inGroup(config, g, me)) : -1;
-  if (gi >= 0) {
+  if (gi >= 0 && next.format === 'stroke') {
+    const others = next.groups[gi].players.filter((p) => p !== me).map((p) => esc(playerName(p)));
+    sub = `${next.tees?.[gi] ? `${esc(next.tees[gi])} · ` : ''}Captain Round with ${others.join(' & ')} · low 2 are captains`;
+  } else if (gi >= 0) {
     const g = next.groups[gi];
     const mine = g.a.includes(me) ? g.a : g.b;
     const opp = mine === g.a ? g.b : g.a;
