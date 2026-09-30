@@ -14,7 +14,7 @@ export const SCOUTING = {
 
 // Where the subject sits in each clip, so a phone-shaped crop keeps him in frame.
 export const HIGHLIGHTS = {
-  tate: { video: 'media/draft/tate.mp4' },
+  tate: { video: 'media/draft/tate.mp4', song: 'media/draft/songs/tate.m4a' },
   garrett: { video: 'media/draft/garrett.mp4' },
   jonah: { video: 'media/draft/jonah.mp4' },
   brody: { video: 'media/draft/brody.mp4', focus: '8% 50%' },

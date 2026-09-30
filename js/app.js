@@ -1596,35 +1596,49 @@ function namePicker() {
 // has been touched.
 
 let audioUnlocked = false;
-let themeAudio = null;
+// One audio element for everything (the theme and walk-up songs), so the
+// one tap that unlocks it on iPhones covers every song.
+let audioEl = null;
+let audioSrc = null;
 
-function theme() {
-  if (!themeAudio) {
-    themeAudio = new Audio(DRAFT_THEME);
-    themeAudio.preload = 'auto';
+function track(src = DRAFT_THEME) {
+  if (!audioEl) {
+    audioEl = new Audio();
+    audioEl.preload = 'auto';
   }
-  return themeAudio;
+  if (audioSrc !== src) {
+    audioEl.src = src;
+    audioSrc = src;
+  }
+  return audioEl;
 }
+const theme = () => track(DRAFT_THEME);
+// A player's walk-up song, if he has one.
+const songFor = (pid) => HIGHLIGHTS[pid]?.song || null;
 function unlockAudio() {
   const a = theme();
+  // Warm the cache so walk-up songs start right on the drop.
+  Object.values(HIGHLIGHTS).forEach((h) => { if (h.song) fetch(h.song).catch(() => {}); });
   return a.play().then(() => { a.pause(); a.currentTime = 0; audioUnlocked = true; }).catch(() => {});
 }
-function playTheme() {
+function playSong(src) {
   if (!audioUnlocked) return;
-  const a = theme();
+  const a = track(src);
   a.loop = false;
   a.currentTime = 0;
   a.play().catch(() => {});
 }
-// Under the Tuesday VS screen the theme keeps looping until the next move.
+function playTheme() {
+  playSong(DRAFT_THEME);
+}
+// Under the Tuesday VS screen whatever's playing keeps looping until the next move.
 function loopTheme() {
-  if (!audioUnlocked) return;
-  const a = theme();
-  a.loop = true;
-  if (a.paused) a.play().catch(() => {});
+  if (!audioUnlocked || !audioEl) return;
+  audioEl.loop = true;
+  if (audioEl.paused) audioEl.play().catch(() => {});
 }
 function stopThemeLoop() {
-  if (themeAudio?.loop) { themeAudio.loop = false; themeAudio.pause(); }
+  if (audioEl?.loop) { audioEl.loop = false; audioEl.pause(); }
 }
 
 const ordinal = (n) => `${n}${[, 'st', 'nd', 'rd'][n % 100 > 10 && n % 100 < 14 ? 0 : n % 10] || 'th'}`;
@@ -1721,6 +1735,8 @@ function mountReveal(el, item) {
     el.querySelector('.rv-intro').classList.add('gone');
     el.querySelector('.rv-reveal').classList.add('show');
     video?.play().catch(() => {});
+    // Walk-up song on the drop (the theme covers the drumroll).
+    if (!item.skipIntro && songFor(item.pid)) playSong(songFor(item.pid));
     if (!item.skipIntro) {
       el.querySelector('.rv-flash').classList.add('go');
       const colors = [item.color || '#16402b', '#d9ad4a', '#f4efe3'];
@@ -1747,11 +1763,11 @@ function mountReveal(el, item) {
   }
   el.querySelector('.vs-sound')?.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (!audioUnlocked) unlockAudio().then(() => { loopTheme(); e.target.textContent = '🎵'; });
+    if (!audioUnlocked) unlockAudio().then(() => { playSong(songFor(item.pid) || DRAFT_THEME); loopTheme(); e.target.textContent = '🎵'; });
   });
   el.querySelector('.rv-sound').addEventListener('click', (e) => {
     e.stopPropagation();
-    if (!audioUnlocked) unlockAudio().then(() => { playTheme(); e.target.textContent = soundBtn(); });
+    if (!audioUnlocked) unlockAudio().then(() => { playSong(songFor(item.pid) || DRAFT_THEME); e.target.textContent = soundBtn(); });
   });
   return timers;
 }
@@ -1768,12 +1784,13 @@ function queueReveal(item) {
   el.appendChild(scene);
   const timers = mountReveal(scene, { skipIntro: true, ...item });
   if (item.skipIntro === false) playTheme();
+  else if (songFor(item.pid)) playSong(songFor(item.pid));
   el.insertAdjacentHTML('beforeend', '<div class="rv-bar"><span>Replay</span><button class="rv-btn">Close</button></div>');
   el.addEventListener('click', (e) => {
     if (e.target.closest('.rv-sound, .vs-sound')) return;
     timers.forEach(clearTimeout);
     stopThemeLoop();
-    theme().pause();
+    audioEl?.pause();
     el.remove();
   });
 }

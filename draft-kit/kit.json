@@ -22,5 +22,8 @@
   "todo": [],
   "photos": {
     "skyler": "players/skyler/photo.jpg"
+  },
+  "songs": {
+    "tate": "players/tate/song.m4a"
   }
 }
