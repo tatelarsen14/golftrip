@@ -993,3 +993,34 @@ label.btn.disabled { opacity: .4; }
 .rc-stk { color: #d9ad4a; font-size: 10.5px; margin-top: 3px; }
 .rc-amt { margin-left: auto; color: #e2c170; }
 .rc-foot { display: flex; justify-content: space-between; padding: 10px 12px 12px; font: 600 9px Inter, sans-serif; letter-spacing: .1em; text-transform: uppercase; color: #6b7568; }
+
+/* Friday's Captain Round board, Masters style */
+.cr-card.masters { background: #0f4a2c; border: 3px solid #0b3a22; padding: 0 0 10px; overflow: hidden; color: #f4efe3; }
+.ms-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 12px 14px 8px; }
+.ms-title { font: 700 26px/1 Georgia, 'Times New Roman', serif; letter-spacing: .08em; text-transform: uppercase; color: #fff; }
+.ms-course { font: 600 10px Inter, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: #f2d45c; text-align: right; }
+.ms-board { margin: 0 8px; display: grid; gap: 3px; }
+.ms-row { display: grid; grid-template-columns: 34px 1fr 54px 36px 40px; align-items: center; background: #fbfaf5; color: #0f4a2c;
+  border-radius: 2px; min-height: 38px; box-shadow: inset 0 -2px 0 #d9d5c7; font: 700 17px Georgia, 'Times New Roman', serif; }
+.ms-row > span { padding: 4px 6px; text-align: center; }
+.ms-row .ms-name { text-align: left; letter-spacing: .04em; border-left: 2px solid #0f4a2c; border-right: 2px solid #0f4a2c; line-height: 1.1; }
+.ms-row .ms-par { border-right: 2px solid #0f4a2c; font-size: 19px; }
+.ms-row .ms-thru { border-right: 2px solid #0f4a2c; font-size: 15px; }
+.ms-row .ms-tot { font-size: 15px; color: #1d241f; }
+.ms-row small { display: block; font: 600 9.5px Inter, sans-serif; letter-spacing: .04em; color: #6b7568; text-transform: none; margin-top: 1px; }
+.ms-cols { background: transparent; box-shadow: none; min-height: 0; color: #f2d45c; font: 700 8.5px Inter, sans-serif; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+.ms-cols > span { padding: 0 2px; }
+.ms-cols .ms-name, .ms-cols .ms-par, .ms-cols .ms-thru { border-color: transparent; }
+.ms-cols .ms-tot, .ms-cols .ms-par, .ms-cols .ms-thru { color: #f2d45c; font-size: 8.5px; }
+.ms-row.cap { box-shadow: inset 4px 0 0 #f2d45c, inset 0 -2px 0 #d9d5c7; }
+.ms-c { display: inline-block; font: 700 10px Inter, sans-serif; font-style: normal; background: #f2d45c; color: #0f4a2c; border-radius: 3px; padding: 1px 5px; margin-left: 6px; vertical-align: 2px; }
+.ms-red { color: #c8102e; }
+.ms-grn { color: #0f4a2c; }
+.ms-big { margin: 10px 8px 0; overflow-x: auto; -webkit-overflow-scrolling: touch; background: #fbfaf5; border-radius: 2px; }
+.ms-big table { border-collapse: collapse; font: 700 14px Georgia, 'Times New Roman', serif; color: #0f4a2c; }
+.ms-big th, .ms-big td { border: 1px solid #0f4a2c; padding: 4px 0; min-width: 26px; text-align: center; }
+.ms-big th { position: sticky; left: 0; background: #fbfaf5; padding: 4px 8px; text-align: left; font-size: 12px; letter-spacing: .04em; min-width: 76px; z-index: 1; }
+.ms-big .ms-hole td, .ms-big .ms-hole th { background: #0f4a2c; color: #fff; font: 700 11px Inter, sans-serif; }
+.ms-big .ms-parrow td, .ms-big .ms-parrow th { font: 600 11px Inter, sans-serif; color: #0f4a2c; background: #efece1; }
+.ms-sub { margin: 8px 12px 0; font-size: 12px; color: #cfe0d4; }
+.cr-card.masters .tie-step { margin: 10px 8px 0; background: #fbfaf5; color: #1d241f; border-radius: 6px; padding: 10px; }

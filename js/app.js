@@ -528,19 +528,40 @@ function captainBoard(config) {
   const started = cr.rows.some((r) => r.thru);
   const final = cr.allDone;
   const caps = draft.captains || [];
+  // Masters colors: red under par, green even or over.
+  const num = (v) => `<span class="${v < 0 ? 'ms-red' : 'ms-grn'}">${v === 0 ? 'E' : v < 0 ? -v : `+${v}`}</span>`;
   const rows = cr.rows.map((r, i) => {
     const cap = final ? caps.includes(r.id) : started && i < 2 && r.thru > 0;
     const first = final && caps[0] === r.id;
     // Tiebreak notes only where they decide a captain spot or the first pick.
     const tb = final && r.tiebreak && i < 3 && !(r.unresolved && !cr.puttoff?.players.includes(r.id)) ? r.tiebreak : null;
-    return `<div class="cr-row ${cap ? 'cap' : ''}">
-      <span class="cr-rank">${r.thru ? r.rank : ''}</span>
-      <span class="cr-name">${esc(playerName(r.id))}${cap ? `<span class="cr-c" title="Captain">C</span>` : ''}${first ? '<small>picks first</small>' : ''}
-        ${tb ? `<small>${r.unresolved ? 'still tied' : `on ${esc(tb.toLowerCase())}`}</small>` : ''}</span>
-      <span class="cr-thru">${r.done ? `${r.gross}${tb ? ` <small>(${r.back} in)</small>` : ''}` : r.thru ? `thru ${r.thru}` : ''}</span>
-      <span class="cr-par ${r.toPar < 0 ? 'under' : ''}">${r.thru ? fmtToPar(r.toPar) : '–'}</span>
+    const note = [first ? 'picks first' : '', tb ? (r.unresolved ? 'still tied' : `on ${esc(tb.toLowerCase())}`) : ''].filter(Boolean).join(' · ');
+    return `<div class="ms-row ${cap ? 'cap' : ''}">
+      <span class="ms-pos">${r.thru ? `${cr.rows.filter((x) => x.rank === r.rank && x.thru).length > 1 ? 'T' : ''}${r.rank}` : ''}</span>
+      <span class="ms-name">${esc(playerName(r.id).toUpperCase())}${cap ? '<i class="ms-c" title="Captain">C</i>' : ''}${note ? `<small>${note}</small>` : ''}</span>
+      <span class="ms-par">${r.thru ? num(r.toPar) : '<span class="ms-grn">–</span>'}</span>
+      <span class="ms-thru">${r.done ? 'F' : r.thru || ''}</span>
+      <span class="ms-tot">${r.thru ? (r.done && tb ? `${r.gross}<small>${r.back} in</small>` : r.gross) : ''}</span>
     </div>`;
   }).join('');
+  // The big board: each player's running score to par after every hole.
+  const holes = holesOf(cr.round);
+  const pars = config.pars?.[cr.round.id] || {};
+  const grid = cr.rows.map((r) => {
+    const sc = store.scores[cr.round.id]?.[r.id] || {};
+    let run = 0;
+    let gap = false;
+    const cells = holes.map((h) => {
+      if (gap || !sc[h]) { gap = true; return '<td></td>'; }
+      run += sc[h] - (pars[h] || 0);
+      return `<td>${num(run)}</td>`;
+    }).join('');
+    return `<tr><th>${esc(playerName(r.id).toUpperCase())}</th>${cells}</tr>`;
+  }).join('');
+  const bigBoard = started ? `<div class="ms-big"><table>
+      <tr class="ms-hole"><th>HOLE</th>${holes.map((h) => `<td>${h}</td>`).join('')}</tr>
+      <tr class="ms-parrow"><th>PAR</th>${holes.map((h) => `<td>${pars[h] ?? ''}</td>`).join('')}</tr>
+      ${grid}</table></div>` : '';
   let puttoff = '';
   if (cr.puttoff && !draft.manual) {
     const left = cr.puttoff.players.filter((p) => !cr.puttoff.done.includes(p));
@@ -556,10 +577,15 @@ function captainBoard(config) {
     : final ? (caps.length ? 'The two low scores are the captains.' : 'Tied for a captain spot after the back 9.')
       : started ? 'Live. The top two when everyone finishes are the captains (tie: lower back 9, then a putt-off).'
         : 'Straight stroke play. The two low scores are the captains.';
-  return `<div class="card cr-card">
-    <div class="cr-head"><span>🎖️ Captain Round</span><span>${esc(cr.round.course)}</span></div>
-    <p class="muted">${sub}</p>
-    ${rows}${puttoff}
+  return `<div class="card cr-card masters">
+    <div class="ms-top"><span class="ms-title">Leaders</span><span class="ms-course">${esc(cr.round.course)} · Captain Round</span></div>
+    <div class="ms-board">
+      <div class="ms-row ms-cols"><span class="ms-pos">Pos</span><span class="ms-name">Player</span><span class="ms-par">Score</span><span class="ms-thru">Thru</span><span class="ms-tot">Tot</span></div>
+      ${rows}
+    </div>
+    ${bigBoard}
+    <p class="ms-sub">${sub}</p>
+    ${puttoff}
   </div>`;
 }
 
