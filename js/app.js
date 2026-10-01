@@ -15,7 +15,7 @@ const ORGANIZER = 'tate';
 const PLAYER_IDS = PLAYERS.map((p) => p.id);
 const SKIN_STAKE = 5;
 // Shown at the bottom of the Trip tab, to check a phone has the latest version.
-const APP_VERSION = 'Oct 1 · 2';
+const APP_VERSION = 'Oct 1 · 3';
 const app = document.getElementById('app');
 
 let store;
@@ -1911,6 +1911,15 @@ function track(src = DRAFT_THEME) {
   return audioEl;
 }
 const theme = () => track(DRAFT_THEME);
+// Download every clip and song once the room opens, so each reveal plays
+// right away instead of buffering on the drop.
+let clipsFetched = false;
+function prefetchClips() {
+  if (clipsFetched) return;
+  clipsFetched = true;
+  const urls = [...new Set(Object.values(HIGHLIGHTS).flatMap((h) => [h.video, h.song]).filter(Boolean))];
+  urls.reduce((p, u) => p.then(() => fetch(u).then((r) => r.blob()).catch(() => {})), Promise.resolve());
+}
 // A player's walk-up song, if he has one.
 const songFor = (pid) => HIGHLIGHTS[pid]?.song || null;
 function unlockAudio() {
@@ -1919,15 +1928,15 @@ function unlockAudio() {
   Object.values(HIGHLIGHTS).forEach((h) => { if (h.song) fetch(h.song).catch(() => {}); });
   return a.play().then(() => { a.pause(); a.currentTime = 0; audioUnlocked = true; }).catch(() => {});
 }
-function playSong(src) {
+function playSong(src, fromMs = 0) {
   if (!audioUnlocked) return;
   const a = track(src);
   a.loop = false;
-  a.currentTime = 0;
+  a.currentTime = fromMs / 1000;
   a.play().catch(() => {});
 }
-function playTheme() {
-  playSong(DRAFT_THEME);
+function playTheme(fromMs = 0) {
+  playSong(DRAFT_THEME, fromMs);
 }
 // Under the Tuesday VS screen whatever's playing keeps looping until the next move.
 function loopTheme() {
@@ -2059,9 +2068,10 @@ function mountReveal(el, item) {
   else {
     // The draft (captains and picks) gets a drumroll twice as long.
     const slow = item.slowIntro ? 2 : 1;
-    at(400 * slow, () => el.querySelector('.rv-l1').classList.add('show'));
-    at(1500 * slow, () => el.querySelector('.rv-l2').classList.add('show'));
-    at(3200 * slow, drop);
+    const late = item.behind || 0; // started this many ms late: skip ahead
+    at(Math.max(0, 400 * slow - late), () => el.querySelector('.rv-l1').classList.add('show'));
+    at(Math.max(0, 1500 * slow - late), () => el.querySelector('.rv-l2').classList.add('show'));
+    at(Math.max(0, 3200 * slow - late), drop);
   }
   el.querySelector('.vs-sound')?.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -2452,19 +2462,24 @@ function syncStage() {
     stageTimers.forEach(clearTimeout);
     // Only phones that are there as it happens get the drumroll and music;
     // anyone joining late lands on the finished reveal.
-    const fresh = Date.now() - sc.startAt < 6000;
+    // Every phone runs the reveal on the same clock, from when the pick was
+    // made, so a phone that hears about it a few seconds late catches up
+    // instead of running behind.
+    const behind = Math.max(0, Date.now() - sc.startAt);
+    const fresh = behind < 12000;
     let item;
     if (sc.mode === 'tue') item = tueItem(sc);
     else if (sc.kind === 'captains') item = captainReveals()[sc.step];
     else item = pickReveal(sc.n);
-    if (!item.title) item = { ...item, skipIntro: !fresh };
+    if (!item.title) item = { ...item, skipIntro: !fresh, behind };
     // A looping song ends at the next reveal; a title card lets it play out.
     if (item.title) { if (audioEl) audioEl.loop = false; } else if (!item.vs) stopThemeLoop();
     stageTimers = mountReveal(stageEl.querySelector('.rv-scene'), item);
     stageEl.style.setProperty('--c', item.color || '#16402b');
     const opener = sc.mode === 'tue' ? sc.kind !== 'done' : sc.kind === 'pick' || sc.step === 0;
-    if (fresh && opener) playTheme();
+    if (fresh && opener) playTheme(behind);
     pickSheetOpen = false;
+    prefetchClips();
   }
   renderStageBar(sc);
 }
