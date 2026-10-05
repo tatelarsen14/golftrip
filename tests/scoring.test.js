@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildMatches, computeMatch, computeStandings, sideScore, scoreMark, birdieCounts, rankTeams, resolveConfig,
   matchStreak, birdieStreak, highlights, longestBirdieRun, longestMatchRun,
-  captainRound, draftState, computeSkins, settleUp, roundPoints, tueDraftState,
+  captainRound, draftState, computeSkins, settleUp, roundPoints, tueDraftState, bonusPoints,
 } from '../js/scoring.js';
 import { DEFAULT_CONFIG, PLAYERS, ROTATION } from '../js/data.js';
 
@@ -47,7 +47,7 @@ test('before the draft every scoring round waits and there are no matches', () =
 
 test('after the draft: 6 matches a day Sat-Mon plus Quicksands; Tuesday waits', () => {
   const matches = matchesOf();
-  assert.equal(matches.length, 3 * 6 + 2);
+  assert.equal(matches.length, 3 * 6 + 3);
   const sat = matches.filter((m) => m.roundId === 'sat');
   assert.deepEqual(sat.map((m) => m.type), ['bestball', 'singles', 'singles', 'bestball', 'singles', 'singles']);
   assert.deepEqual(sat[0].sides.map((s) => s.players), [['tate', 'sam'], ['garrett', 'jonah']]);
@@ -495,4 +495,19 @@ test('handicaps don\'t touch skins, birdies or Friday', () => {
   const sk = computeSkins(view(scores, hcpCfg), scores, IDS);
   assert.equal(sk.holes.find((h) => h.roundId === 'sat' && h.hole === 3).winner, null);
   assert.equal(birdieCounts(view(scores, hcpCfg), scores, IDS).sam.birdies, 0);
+});
+
+test('Quicksands hole in one: a bonus point for the team, banked right away, not a match win', () => {
+  const v = view();
+  const m = buildMatches(v).find((x) => x.type === 'teamaces');
+  const scores = { qs: { tate: { 1: 3, 2: 1 }, sam: { 1: 1 }, garrett: { 5: 1 } } };
+  const r = computeMatch(m, scores.qs);
+  assert.deepEqual(r.points, [2, 1]);
+  assert.equal(r.done, true);
+  assert.equal(bonusPoints(v, scores), 3);
+  const st = computeStandings(v, scores);
+  assert.equal(st.teams[0].points, 2);
+  assert.equal(st.teams[0].w + st.teams[0].l + st.teams[0].h, 0);
+  assert.equal(st.players.tate.points, 0.5); // split four ways like the rest of Quicksands
+  assert.equal(bonusPoints(v, {}), 0);
 });

@@ -17,7 +17,9 @@ export const ESCALATING_BACK_POINTS = 1;
 export const HCP_BUCKETS = [3, 12];
 export const STROKES_PER_NINE = 4;
 export const TEAMSTROKE_STROKES = 4;
-const TEAM_TYPES = ['teamstroke', 'teambirdies'];
+const TEAM_TYPES = ['teamstroke', 'teambirdies', 'teamaces'];
+// Quicksands: every hole in one is a bonus point for the team.
+export const ACE_POINTS = 1;
 export const isTeamMatch = (m) => TEAM_TYPES.includes(m.type);
 
 // Holes in a round (18, or 14 at Quicksands), and its two halves.
@@ -97,6 +99,10 @@ export function buildMatches(config) {
       matches.push({
         roundId: round.id, group: -1, id: `${round.id}-birdies`, type: 'teambirdies', label: `Most birdies · ${BIRDIE_POINTS} pt`,
         weight: BIRDIE_POINTS, holes, pars: config.pars?.[round.id] || {}, sides: structuredClone(sides), strokes: {},
+      });
+      matches.push({
+        roundId: round.id, group: -1, id: `${round.id}-aces`, type: 'teamaces', label: `Hole in one · ${ACE_POINTS} pt each`,
+        weight: ACE_POINTS, holes, pars: config.pars?.[round.id] || {}, sides: structuredClone(sides), strokes: {},
       });
       continue;
     }
@@ -227,11 +233,34 @@ function computeTeamBirdies(match, roundScores) {
   };
 }
 
+// Hole-in-one bonus: each ace is a point for the team, banked as it happens.
+// Always "final" (nothing to wait on); not a match win or loss.
+function computeTeamAces(match, roundScores) {
+  const sides = match.sides.map((side) => ({
+    aces: side.players.reduce((a, p) => a + match.holes.filter((h) => roundScores?.[p]?.[h] === 1).length, 0),
+  }));
+  const pts = sides.map((sd) => sd.aces * (match.weight || ACE_POINTS));
+  const diff = sides[0].aces - sides[1].aces;
+  return {
+    played: sides[0].aces + sides[1].aces, remaining: 0, done: true, diff, sides,
+    leader: diff > 0 ? 0 : diff < 0 ? 1 : null, up: Math.abs(diff), status: `${sides[0].aces}–${sides[1].aces}`,
+    points: pts, projected: pts,
+    holes: match.holes.map((hole) => ({ hole, a: null, b: null, winner: null, diff: null })),
+  };
+}
+
+// Bonus points from aces at Quicksands, on top of each round's points.
+export function bonusPoints(config, scores) {
+  return buildMatches(config).filter((m) => m.type === 'teamaces')
+    .reduce((a, m) => a + computeTeamAces(m, scores[m.roundId]).points.reduce((x, y) => x + y, 0), 0);
+}
+
 // Returns the live state of one match. `diff` > 0 means side 0 is up.
 // Holes are won on net scores (see `strokes`).
 export function computeMatch(match, roundScores) {
   if (match.type === 'teamstroke') return computeTeamStroke(match, roundScores);
   if (match.type === 'teambirdies') return computeTeamBirdies(match, roundScores);
+  if (match.type === 'teamaces') return computeTeamAces(match, roundScores);
   const total = match.holes.length;
   let diff = 0;
   let played = 0;
@@ -300,7 +329,9 @@ export function computeStandings(config, scores) {
     m.sides.forEach((side, si) => {
       const credit = (row, share = 1) => {
         if (!row) return;
-        if (res.points) {
+        if (res.points && m.type === 'teamaces') {
+          row.points += res.points[si] * share; // bonus only: not a win, loss or halve
+        } else if (res.points) {
           row.points += res.points[si] * share;
           if (res.leader === null) row.h++;
           else if (res.leader === si) row.w++;
@@ -387,7 +418,7 @@ export function rankTeams(config, scores, roundIds, stage = 'final') {
     m.sides.forEach((side, si) => {
       const t = stats[side.team];
       t.points += res.points[si];
-      if (res.leader === si) t.wins++;
+      if (res.leader === si && m.type !== 'teamaces') t.wins++;
       // Holes-up margin is match play only (Quicksands is counted in strokes).
       if (res.leader !== null && !isTeamMatch(m)) t.margin += res.leader === si ? res.up : -res.up;
     });
@@ -793,7 +824,7 @@ export function highlights(config, scores, times, playerIds) {
       if (side !== null) run.push(h.hole);
     }
     endRun();
-    if (res.done) {
+    if (res.done && match.type !== 'teamaces') {
       const last = [...res.holes].reverse().find((h) => h.winner !== null) || res.holes[res.holes.length - 1];
       items.push({
         id: `hl-${match.id}-final`, type: 'matchFinal', match, res,

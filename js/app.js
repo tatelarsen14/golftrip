@@ -3,7 +3,7 @@ import { PLAYERS, TEAM_COLORS, TRIP, ITINERARY, FLIGHTS, HOLE_HANDICAPS } from '
 import {
   buildMatches, computeMatch, computeStandings, birdieCounts, parFor, scoreMark, rankTeams, resolveConfig,
   TIEBREAKERS, puttoffKey, holesOf, halvesOf, groupRoster, roundPoints, ESCALATING_BACK_POINTS, TEAMSTROKE_POINTS,
-  BIRDIE_POINTS, STROKES_PER_NINE, TEAMSTROKE_STROKES, HCP_BUCKETS, isTeamMatch, netScore,
+  BIRDIE_POINTS, ACE_POINTS, bonusPoints, STROKES_PER_NINE, TEAMSTROKE_STROKES, HCP_BUCKETS, isTeamMatch, netScore,
   matchStreak, birdieStreak, highlights, longestBirdieRun, longestMatchRun, roundTotals,
   captainRound, draftState, computeSkins, settleUp, tueDraftState, hardestHoles,
 } from './scoring.js';
@@ -15,7 +15,7 @@ const ORGANIZER = 'tate';
 const PLAYER_IDS = PLAYERS.map((p) => p.id);
 const SKIN_STAKE = 5;
 // Shown at the bottom of the Trip tab, to check a phone has the latest version.
-const APP_VERSION = 'Oct 1 · 3';
+const APP_VERSION = 'Oct 5 · 1';
 const app = document.getElementById('app');
 
 let store;
@@ -315,7 +315,7 @@ function tiePanel(config, title, sub, ties, stage, ranked) {
 
 // How the tournament works, for the Format dropdown on the Leaderboard.
 function formatInfo(config) {
-  const total = enabledRounds(config).reduce((a, r) => a + roundPoints(r), 0);
+  const total = enabledRounds(config).reduce((a, r) => a + roundPoints(r), 0) + bonusPoints(config, store.scores);
   return `<div class="info-panel">
     <p><b>Friday · Captain Round.</b> Stroke play at Indian Canyon, no points or skins. The two low scores are the captains
       (tie: lower back 9, then a putt-off). They draft the two teams of 4 right here: low score picks first, then they alternate.</p>
@@ -326,7 +326,8 @@ function formatInfo(config) {
     </ul>
     <p>Partners rotate so you play with each teammate once and face three different opponents. 6 points a day.</p>
     <p><b>Mon AM · Quicksands.</b> Team stroke play over 14 par 3s. All four net scores on each team count; the lower team total wins
-      ${TEAMSTROKE_POINTS} points (tie = 1 each). Plus ${BIRDIE_POINTS} point for the team with the most birdies (eagles count, gross; tie = ½ each).</p>
+      ${TEAMSTROKE_POINTS} points (tie = 1 each). Plus ${BIRDIE_POINTS} point for the team with the most birdies (eagles count, gross; tie = ½ each),
+      and a bonus ${ACE_POINTS} point for the team for every hole in one.</p>
     <p><b>Tuesday · Singles.</b> Monday night the captains set the front 9 matchups in turn: one puts a player out, the other picks who plays him.
       The trailing team puts out first, so the team in first answers twice; match 4 is whoever's left. On the back 9 you play the other guy
       in your group. 1 point a nine, ${roundPoints({ format: 'escalating' })} points.</p>
@@ -347,6 +348,7 @@ function formatInfo(config) {
 // Quicksands: team-vs-team cards, one for net score to par and one for
 // the birdie point.
 function strokeCard(config, match, res) {
+  if (match.type === 'teamaces') return aceCard(config, match, res);
   const birdies = match.type === 'teambirdies';
   const side = (si) => {
     const s = res.sides[si];
@@ -382,6 +384,22 @@ function strokeCard(config, match, res) {
   return `<article class="bc-match">
     <div class="bc-kind"><span>${esc(match.label)}</span><span>${res.done ? 'Final' : res.projected ? `All thru ${res.played}` : ''}</span></div>
     <div class="bc-bar">${side(0)}${status}${side(1)}</div>
+  </article>`;
+}
+
+// Quicksands hole-in-one points: only shows once someone has made one.
+function aceCard(config, match, res) {
+  if (!res.played) return '';
+  const side = (si) => {
+    const t = match.sides[si].team;
+    const n = res.sides[si].aces;
+    return `<div class="bc-side ${si ? 'b' : 'a'} ${n ? 'lead' : 'trail'}" style="--c:${teamColor(t)}">
+      <div class="bc-team">${esc(teamName(config, t))}</div>
+      <div class="bc-names">${n} ⛳</div><div class="bc-sub">+${fmtHalf(res.points[si])} pt${res.points[si] === 1 ? '' : 's'}</div></div>`;
+  };
+  return `<article class="bc-match">
+    <div class="bc-kind"><span>${esc(match.label)}</span><span>Bonus</span></div>
+    <div class="bc-bar">${side(0)}<div class="bc-status final"><div class="big">${esc(res.status)}</div><div class="small">aces</div></div>${side(1)}</div>
   </article>`;
 }
 
@@ -789,7 +807,7 @@ function renderBoard() {
 
   // Cup scoreboard: big points, team colors, the leader lit up, and a bar
   // toward the points it takes to win.
-  const total = scoring.reduce((a, r) => a + roundPoints(r), 0);
+  const total = scoring.reduce((a, r) => a + roundPoints(r), 0) + bonusPoints(config, scores);
   const toWin = total / 2 + 0.5;
   const leaderPts = Math.max(0, ...ranked.map((r) => r.points));
   const teamRows = ranked.map((r, i) => {
@@ -960,7 +978,7 @@ function recapCard(date) {
       <div class="rc-caps">${caps.length === 2 ? `🎖️ Captains: <b>${name(caps[0])}</b> (picks first) &amp; <b>${name(caps[1])}</b>` : 'Captains TBD'}</div>`;
   } else {
     const scoring = rounds.filter((r) => r.format !== 'stroke');
-    const total = scoring.reduce((a, r) => a + roundPoints(r), 0);
+    const total = scoring.reduce((a, r) => a + roundPoints(r), 0) + bonusPoints(config, scores);
     const pts = standings.teams.map((t) => t.points);
     const today = [0, 0];
     standings.matches.filter(({ match, result }) => todays.some((r) => r.id === match.roundId) && result.points)
@@ -996,6 +1014,10 @@ function recapCard(date) {
     }
   } else {
     const row = ({ match, result: res }) => {
+      if (match.type === 'teamaces') {
+        return `<div class="rc-row"><span class="rc-kind">Aces</span><span>${match.sides.map((sd, si) => `${dot(sd.team)}<b>${esc(teamName(config, sd.team))}</b> ${res.sides[si].aces}`).join(' · ')}</span>
+          <span class="rc-pill" style="background:#b8860b">+${res.played}</span></div>`;
+      }
       const kind = { bestball: 'Best ball', teamstroke: 'Net total', teambirdies: 'Birdies' }[match.type]
         || (match.label?.includes('Front') ? 'Front 9' : match.label?.includes('Back') ? 'Back 9' : 'Singles');
       const lab = (si) => esc(sideLabel(match.sides[si]));
@@ -1009,7 +1031,7 @@ function recapCard(date) {
         <span class="rc-pill" style="background:${teamColor(match.sides[w].team)}">${pill}</span></div>`;
     };
     const blocks = todays.map((r) => {
-      const ms = standings.matches.filter((m) => m.match.roundId === r.id);
+      const ms = standings.matches.filter((m) => m.match.roundId === r.id && (m.match.type !== 'teamaces' || m.result.played));
       const pre = todays.length > 1 ? `${esc(r.course)} · ` : '';
       if (r.format === 'teamstroke') return `<div class="rc-grp">${pre}All 8 · ${roundPoints(r)} pts</div>${ms.map(row).join('')}`;
       return r.groups.map((g, gi) => `<div class="rc-grp">${pre}Group ${gi + 1}${r.tees?.[gi] ? ` · ${esc(r.tees[gi].replace(' PM', '').replace(' AM', ''))}` : ''}</div>
@@ -2660,6 +2682,7 @@ function checkForFinishes() {
   const events = []; // { key, at, banner, first }
   let lastFinal = 0;
   for (const m of buildMatches(view)) {
+    if (m.type === 'teamaces') continue; // aces get their own banner below
     const res = computeMatch(m, store.scores[m.roundId]);
     if (!res.done) continue;
     const last = [...res.holes].reverse().find((h) => h.winner !== null)?.hole || m.holes[m.holes.length - 1];
