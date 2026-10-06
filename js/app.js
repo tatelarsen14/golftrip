@@ -15,7 +15,7 @@ const ORGANIZER = 'tate';
 const PLAYER_IDS = PLAYERS.map((p) => p.id);
 const SKIN_STAKE = 5;
 // Shown at the bottom of the Trip tab, to check a phone has the latest version.
-const APP_VERSION = 'Oct 5 · 1';
+const APP_VERSION = 'Oct 5 · 2';
 const app = document.getElementById('app');
 
 let store;
@@ -174,7 +174,7 @@ function pendingNote(config, round) {
   return `<div class="card tbd">
     <div class="tbd-title">${dayName(round)} matchups TBD</div>
     <p>Once every match through Monday is final, the captains set the front 9 singles matchups Monday night, Presidents Cup style
-      (the trailing team puts a player out first). Front 9 matches are worth 1, then opponents swap for the back 9, also worth ${ESCALATING_BACK_POINTS}.</p>
+      (the team in first puts a player out first). Front 9 matches are worth 1, then opponents swap for the back 9, also worth ${ESCALATING_BACK_POINTS}.</p>
     ${now}
   </div>`;
 }
@@ -329,7 +329,7 @@ function formatInfo(config) {
       ${TEAMSTROKE_POINTS} points (tie = 1 each). Plus ${BIRDIE_POINTS} point for the team with the most birdies (eagles count, gross; tie = ½ each),
       and a bonus ${ACE_POINTS} point for the team for every hole in one.</p>
     <p><b>Tuesday · Singles.</b> Monday night the captains set the front 9 matchups in turn: one puts a player out, the other picks who plays him.
-      The trailing team puts out first, so the team in first answers twice; match 4 is whoever's left. On the back 9 you play the other guy
+      The team in first puts out first, so the trailing team answers twice; match 4 is whoever's left. On the back 9 you play the other guy
       in your group. 1 point a nine, ${roundPoints({ format: 'escalating' })} points.</p>
     <p><b>Points:</b> Win = 1 · Tie = ½ · Loss = 0. ${total} points in all, so ${fmtHalf(total / 2 + 0.5)} wins the Cup.
       Level at the end goes to the tiebreakers: there's no shared Cup.</p>
@@ -693,7 +693,7 @@ function tuePicksCard(config, round) {
   return `<div class="card tp-card">
     <div class="cr-head"><span>👑 Tuesday matchups</span><span>${td.started ? 'Live' : 'Monday night'}</span></div>
     <p class="muted">${esc(teamName(config, L))} finished first. The captains set Tuesday's <b>front 9</b> matchups (1 pt each):
-      ${name(captainOf(config, 1 - L))} puts a player out, ${name(captainOf(config, L))} picks who plays him, then they swap. The leader answers twice;
+      ${name(captainOf(config, L))} puts a player out, ${name(captainOf(config, 1 - L))} picks who plays him, then they swap. The trailing team answers twice;
       match 4 is whoever's left. On the back 9 (1 pt each) you play the other guy in your group.</p>
     ${rows}
     ${action}
@@ -2393,7 +2393,7 @@ function tueItem(sc) {
   const tn = (t) => esc(teamName(view, t));
   if (sc.kind === 'start') {
     return { title: 'Tuesday matchups', color: teamColor(st.trail),
-      sub: `${tn(st.leader)} finished first · ${esc(playerName(captainOf(view, st.trail)))} puts out first` };
+      sub: `${tn(st.leader)} finished first · ${esc(playerName(captainOf(view, st.leader)))} puts out first` };
   }
   if (sc.kind === 'done') {
     const list = st.front.map((b, m) => `<div class="rv-set-row"><span>${teeFor(m)} · Match ${m + 1}</span>
@@ -2403,16 +2403,17 @@ function tueItem(sc) {
   }
   if (sc.kind === 'last1' || sc.kind === 'last2') {
     // Match 4 is whoever's left, but it still gets the full treatment.
-    const [p1, p2] = [st.front[3][st.leader], st.front[3][st.trail]];
+    // Match 4 keeps the alternation: the trailing team sends out, the leader answers.
+    const [p1, p2] = [st.front[3][st.trail], st.front[3][st.leader]];
     const pill = `Match 4 · ${teeFor(3)}`;
     if (sc.kind === 'last1') {
-      return { pid: p1, color: teamColor(st.leader), kicker: 'Tuesday matchups · Match 4',
-        line1: 'Match 4<br>Last two standing', line2: `<b>${tn(st.leader)}</b> sends out`,
-        pill, selects: `${tn(st.leader)} · last man up`, sub: 'Match 4 · Front 9 · 1 pt', card: recordCard(p1) };
+      return { pid: p1, color: teamColor(st.trail), kicker: 'Tuesday matchups · Match 4',
+        line1: 'Match 4<br>Last two standing', line2: `<b>${tn(st.trail)}</b> sends out`,
+        pill, selects: `${tn(st.trail)} · last man up`, sub: 'Match 4 · Front 9 · 1 pt', card: recordCard(p1) };
     }
-    return { pid: p2, color: teamColor(st.trail), kicker: 'Tuesday matchups · Match 4',
-      line1: `Who's got<br>${esc(playerName(p1))}?`, line2: `<b>${tn(st.trail)}</b> answers with`,
-      pill, selects: `vs ${esc(playerName(p1))}`, sub: `${tn(st.trail)} · Match 4`, card: '', vs: vsScreen(3, st) };
+    return { pid: p2, color: teamColor(st.leader), kicker: 'Tuesday matchups · Match 4',
+      line1: `Who's got<br>${esc(playerName(p1))}?`, line2: `<b>${tn(st.leader)}</b> answers with`,
+      pill, selects: `vs ${esc(playerName(p1))}`, sub: `${tn(st.leader)} · Match 4`, card: '', vs: vsScreen(3, st) };
   }
   const m = Math.floor((sc.n - 1) / 2);
   const pid = st.moves[sc.n - 1];

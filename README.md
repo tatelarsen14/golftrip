@@ -62,7 +62,7 @@ groups.
 Once every match through Monday is final, Tate taps **Start the matchups** and every phone
 opens the draft room for the **matchup draft**. The captains set the front 9 matchups (worth
 1 each) in turn, Presidents Cup style: one puts a player out, the other picks who plays him.
-The trailing team puts out first (matches 1 and 3), so the team in first answers twice;
+The team in first puts out first (matches 1 and 3), so the trailing team answers twice;
 match 4 is whoever's left. Matches 1-2 are the 9:20 group, 3-4 the 9:30 group, and the
 back 9 (worth 1) is the other opponent in your group. Every move shows on every phone with
 the player's clip and his Sat–Mon record; once a matchup is set, every phone flips to a VS screen: both clips

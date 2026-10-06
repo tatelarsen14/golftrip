@@ -385,15 +385,15 @@ test('a hole in one is its own highlight and counts as a birdie', () => {
   assert.equal(counts.sam.birdies, 0); // Friday's ace doesn't count on the Birdie Board
 });
 
-test('Tuesday matchup draft: trailing team puts out first, leader answers twice, match 4 fills in', () => {
+test('Tuesday matchup draft: the team in first puts out first, the trailing team answers twice, match 4 fills in', () => {
   // Team Tate (0) leads; Team Garrett (1) trails.
-  const c = { ...cfg, tueDraft: { moves: ['garrett', 'tate', 'sam', 'jonah', 'brody', 'josh'] } };
+  const c = { ...cfg, tueDraft: { moves: ['tate', 'garrett', 'jonah', 'sam', 'josh', 'brody'] } };
   let d = tueDraftState({ ...cfg, tueDraft: { moves: [] } }, 0);
-  assert.deepEqual(d.turn, { match: 0, role: 'out', team: 1, out: null });
-  d = tueDraftState({ ...cfg, tueDraft: { moves: ['garrett'] } }, 0);
-  assert.deepEqual(d.turn, { match: 0, role: 'answer', team: 0, out: 'garrett' });
+  assert.deepEqual(d.turn, { match: 0, role: 'out', team: 0, out: null });
+  d = tueDraftState({ ...cfg, tueDraft: { moves: ['tate'] } }, 0);
+  assert.deepEqual(d.turn, { match: 0, role: 'answer', team: 1, out: 'tate' });
   // A player from the wrong team (or used twice) stops the sequence there.
-  assert.equal(tueDraftState({ ...cfg, tueDraft: { moves: ['tate'] } }, 0).moves.length, 0);
+  assert.equal(tueDraftState({ ...cfg, tueDraft: { moves: ['garrett'] } }, 0).moves.length, 0);
   d = tueDraftState(c, 0);
   assert.equal(d.done, true);
   assert.deepEqual(d.front, [['tate', 'garrett'], ['sam', 'jonah'], ['josh', 'brody'], ['jp', 'skyler']]);

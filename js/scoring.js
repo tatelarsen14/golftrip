@@ -849,8 +849,8 @@ export function roundTotals(config, scores, playerId) {
 // ---------- Tuesday: the matchup draft ----------
 //
 // Monday night the captains set Tuesday's front 9 matchups in turn: one puts
-// a player out, the other picks who plays him. The trailing team puts out
-// first, so the leader answers twice (matches 1 and 3); match 4 is whoever's
+// a player out, the other picks who plays him. The team in first puts out
+// first (matches 1 and 3), so the trailing team answers twice; match 4 is whoever's
 // left. Matches 1-2 are the first group, 3-4 the second; on the back 9 you
 // play the other opponent in your group. 1 pt a nine.
 // `moves` is every player named, in order: out, answer, out, answer, ...
@@ -858,7 +858,7 @@ export function roundTotals(config, scores, playerId) {
 export function tueDraftState(config, leader) {
   const teams = config.teams || [];
   const trail = 1 - leader;
-  const order = [[trail, leader], [leader, trail], [trail, leader]]; // [puts out, answers] per match
+  const order = [[leader, trail], [trail, leader], [leader, trail]]; // [puts out, answers] per match
   const used = new Set();
   const moves = [];
   for (const pid of config.tueDraft?.moves || []) {
