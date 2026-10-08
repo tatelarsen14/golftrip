@@ -38,6 +38,13 @@ code { font-size: .9em; background: var(--cream); padding: 1px 4px; border-radiu
   color: var(--cream);
 }
 .brand { min-width: 0; }
+.final-strip {
+  display: flex; align-items: baseline; justify-content: center; gap: 10px;
+  padding: 8px 16px; background: #d9ad4a; color: var(--forest);
+  font-size: 13px; font-weight: 700;
+}
+.final-strip b { font: 700 13px Oswald, sans-serif; letter-spacing: .16em; text-transform: uppercase; }
+.react:disabled { opacity: 1; cursor: default; }
 .wordmark { font: 700 24px/1 Oswald, sans-serif; letter-spacing: .12em; text-transform: uppercase; }
 .tagline { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: #d9ad4a; margin-top: 3px; }
 .me-chip {

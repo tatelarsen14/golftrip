@@ -12,3 +12,7 @@ export const FIREBASE_CONFIG = {
 
 // Change this to start a fresh tournament in the same database.
 export const TRIP_ID = 'wa-id-2026';
+
+// A finished trip: the app turns read-only (no scores, posts, setup or
+// draft changes) and shows the final result. Set to false to reopen it.
+export const TRIP_LOCKED = true;

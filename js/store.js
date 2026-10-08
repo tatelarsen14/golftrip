@@ -8,7 +8,7 @@
 // social[itemId] = { r: { emoji: [playerId] }, c: [{ by, text, at }] }
 //   (reactions and comments for posts and auto highlights alike)
 
-import { FIREBASE_CONFIG, TRIP_ID } from './firebase-config.js';
+import { FIREBASE_CONFIG, TRIP_ID, TRIP_LOCKED } from './firebase-config.js';
 import { DEFAULT_CONFIG } from './data.js';
 
 const FIREBASE_VERSION = '10.12.2';
@@ -82,7 +82,21 @@ async function shrinkImage(file, maxSide = 1920) {
   }
 }
 
+// Once a trip is locked every write is refused here, whatever the UI shows.
+const WRITES = ['setScore', 'saveConfig', 'updateConfig', 'addPost', 'deletePost', 'toggleReaction', 'addComment', 'uploadMedia'];
+function lock(store) {
+  if (!TRIP_LOCKED) return store;
+  for (const w of WRITES) if (store[w]) store[w] = async () => { throw new Error('This trip is final, so nothing can be changed.'); };
+  store.canUpload = false;
+  store.locked = true;
+  return store;
+}
+
 export async function createStore(onChange) {
+  return lock(await openStore(onChange));
+}
+
+async function openStore(onChange) {
   if (FIREBASE_CONFIG) {
     try {
       return await createFirebaseStore(onChange);

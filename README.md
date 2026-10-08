@@ -85,6 +85,14 @@ at Quicksands (32 in all). All 8 players on the same hole. Once everyone's in, t
 outright low score wins $5 from each of the other 7; any tie and nobody wins it; nothing
 carries. The Leaderboard shows everyone's net and a settle-up list; wins post to the Feed.
 
+## Locked after the trip
+
+`TRIP_LOCKED` in `js/firebase-config.js` makes the app read-only once a trip is
+over: a Final banner up top, no score entry, posting, reactions, Setup tab or
+draft controls, and the store refuses every write. Everything stays viewable,
+including the draft and Tuesday pick replays. Set it to `false` to reopen.
+This is the app's own lock; the Firestore rules are unchanged.
+
 ## Tabs
 
 - **Leaderboard**: a "Your match" card at the top (your round today with an Enter scores button, otherwise a countdown to Circling Raven or your next tee time), then Friday's Captain Round board and the live draft, or Tuesday's matchup picker. Below: the Cup scoreboard with **Format** and **Tiebreakers** dropdowns (and a step-by-step tiebreaker card when the teams are level after Monday or at the end), every match in a TV-broadcast style, Skins (net $ and settle-up) and the Birdie Board (eagles count as birdies).

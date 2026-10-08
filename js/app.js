@@ -15,7 +15,7 @@ const ORGANIZER = 'tate';
 const PLAYER_IDS = PLAYERS.map((p) => p.id);
 const SKIN_STAKE = 5;
 // Shown at the bottom of the Trip tab, to check a phone has the latest version.
-const APP_VERSION = 'Oct 5 · 2';
+const APP_VERSION = 'Oct 8 · Final';
 const app = document.getElementById('app');
 
 let store;
@@ -48,8 +48,13 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
 // Spectators are stored as "g:<name>"; they can post but not enter scores.
 const GUEST = 'g:';
 const playerName = (id) => (id?.startsWith(GUEST) ? id.slice(GUEST.length) : PLAYERS.find((p) => p.id === id)?.name ?? id);
-const isPlayer = () => PLAYERS.some((p) => p.id === ui.me);
-const isAdmin = () => ui.me === ORGANIZER;
+// A locked (finished) trip is view-only for everyone: no scoring, posting or setup.
+const locked = () => !!store?.locked;
+const isPlayer = () => !locked() && PLAYERS.some((p) => p.id === ui.me);
+const isAdmin = () => !locked() && ui.me === ORGANIZER;
+const WRITE_ACTIONS = new Set(['set-score', 'post', 'react', 'comment', 'del-post', 'unpick', 'draft-pick', 'draft-start', 'draft-stop',
+  'draft-undo', 'draft-reset', 'tue-start', 'tue-reset', 'captain-set', 'captain-auto', 'puttoff', 'puttoff-reset', 'cap-puttoff',
+  'cap-puttoff-reset', 'team-color', 'cross', 'hcp-toggle', 'pick-player']);
 const teamOf = (config, pid) => (config.teams || []).findIndex((t) => t.players.includes(pid));
 // Each team's color is the captain's pick; grey for anyone before the draft.
 const teamColor = (idx) => (idx >= 0 ? (view || store?.config)?.teams?.[idx]?.color || TEAM_COLORS[idx % TEAM_COLORS.length] : '#8a938a');
@@ -1302,7 +1307,7 @@ function renderEntry() {
       </div>
       ${strokeNote}
       ${rows}
-      ${canScore ? '' : `<p class="spectator-note">👀 Spectator view: only players enter scores.${ui.me ? '' : ' <button class="link" data-action="change-me">Are you a player?</button>'}</p>`}
+      ${canScore ? '' : locked() ? '<p class="spectator-note">🔒 The trip is final. Scores are locked.</p>' : `<p class="spectator-note">👀 Spectator view: only players enter scores.${ui.me ? '' : ' <button class="link" data-action="change-me">Are you a player?</button>'}</p>`}
       <div class="nav-row">
         <button class="btn ghost" data-action="hole" data-hole="${Math.max(1, hole - 1)}" ${hole === 1 ? 'disabled' : ''}>← Hole ${hole - 1 || ''}</button>
         <button class="btn" data-action="hole" data-hole="${Math.min(last, hole + 1)}" ${hole === last ? 'disabled' : ''}>Hole ${hole < last ? hole + 1 : ''} →</button>
@@ -1648,14 +1653,14 @@ function reactBar(itemId) {
   return `<div class="react-bar">
     ${REACTIONS.map((e) => {
       const who = soc.r?.[e] || [];
-      return `<button class="react ${ui.me && who.includes(ui.me) ? 'mine' : ''}" data-action="react" data-item="${itemId}" data-emoji="${e}"
+      return `<button class="react ${ui.me && who.includes(ui.me) ? 'mine' : ''}" data-action="react" data-item="${itemId}" data-emoji="${e}" ${locked() ? 'disabled' : ''}
         title="${esc(who.map(playerName).join(', '))}">${e}${who.length ? `<span>${who.length}</span>` : ''}</button>`;
     }).join('')}
     <button class="react talk ${open ? 'mine' : ''}" data-action="toggle-comments" data-item="${itemId}">💬${comments.length ? `<span>${comments.length}</span>` : ''}</button>
   </div>
   ${comments.length ? `<div class="comments">${comments.map((c) => `
     <div class="comment"><b>${esc(playerName(c.by))}</b> ${esc(c.text)} <span class="muted">${fmtAgo(c.at)}</span></div>`).join('')}</div>` : ''}
-  ${open ? `<div class="comment-box">
+  ${open && !locked() ? `<div class="comment-box">
     <input type="text" id="c-${itemId}" data-draft="c:${itemId}" value="${esc(drafts[`c:${itemId}`] || '')}" placeholder="Add a comment…" enterkeyhint="send">
     <button class="btn small" data-action="comment" data-item="${itemId}">Send</button>
   </div>` : ''}`;
@@ -1700,7 +1705,8 @@ function renderFeed() {
   items.sort((a, b) => b.at - a.at);
   const limit = ui.feedLimit || 40;
 
-  const composer = !ui.me
+  const composer = locked() ? ''
+    : !ui.me
     ? `<div class="card composer"><button class="btn" data-action="change-me">Pick your name to post</button></div>`
     : `<div class="card composer">
       <textarea id="post-text" data-draft="post" rows="2" placeholder="What's happening, ${esc(playerName(ui.me))}?">${esc(drafts.post || '')}</textarea>
@@ -2804,6 +2810,17 @@ const TABS = [
 // Reached from the champion banner, the Trip tab or a #recap link.
 const HIDDEN_TABS = [['recap', '', 'Recap', renderRecap]];
 
+// The finished trip's result, pinned under the header.
+function finalStrip() {
+  const config = view;
+  if (config.teams?.length !== 2) return '<div class="final-strip"><b>Final</b><span>This trip is over</span></div>';
+  const [a, b] = computeStandings(config, store.scores).teams;
+  const [w, l] = a.points >= b.points ? [a, b] : [b, a];
+  const tie = a.points === b.points;
+  return `<div class="final-strip"><b>Final</b><span>${tie ? `Tied ${fmtHalf(a.points)}–${fmtHalf(b.points)}`
+    : `${esc(w.name)} wins ${fmtHalf(w.points)}–${fmtHalf(l.points)}`}</span></div>`;
+}
+
 function render() {
   // Don't yank a video someone is watching; re-render when it stops.
   if ([...app.querySelectorAll('video')].some((v) => !v.paused && !v.ended)) {
@@ -2829,7 +2846,7 @@ function render() {
     ? (store.online ? '<span class="sync on" title="Live: syncing with everyone"></span>'
       : '<span class="sync off" title="Offline: scores save and sync later"></span><span class="sync-label">Offline</span>')
     : '<span class="sync local" title="Scores only on this device"></span><span class="sync-label">Local</span>';
-  const who = ui.me ? `${esc(playerName(ui.me))}${isPlayer() ? '' : ' 👀'}` : 'Pick name';
+  const who = ui.me ? `${esc(playerName(ui.me))}${isPlayer() || locked() ? '' : ' 👀'}` : 'Pick name';
   const scrollY = window.scrollY;
   const keepScroll = app.dataset.tab === tab[0];
   app.dataset.tab = tab[0];
@@ -2838,6 +2855,7 @@ function render() {
       <div class="brand"><div class="wordmark">Buckle Up</div><div class="tagline">${esc(TRIP.short)} · ${esc(TRIP.shortDates)}</div></div>
       <button class="me-chip" data-action="change-me" aria-label="Change name">${sync}<span>${who}</span><span class="caret">▾</span></button>
     </header>
+    ${locked() ? finalStrip() : ''}
     <main>${tab[3]()}</main>
     <nav class="tabs" style="--n:${tabs.length}">${tabs.map(([id, icon, label]) => `
       <button class="${id === tab[0] ? 'on' : ''}" data-action="tab" data-tab="${id}">
@@ -2862,6 +2880,7 @@ app.addEventListener('click', async (e) => {
   const el = e.target.closest('[data-action]');
   if (!el || el.disabled) return;
   const { action } = el.dataset;
+  if (locked() && WRITE_ACTIONS.has(action)) return;
   const round = currentRound();
 
   switch (action) {
@@ -3186,7 +3205,7 @@ app.addEventListener('change', (e) => {
     return;
   }
   const { edit, team, round } = el.dataset;
-  if (!edit) return;
+  if (!edit || locked()) return;
   if (edit === 'team-name' && !isAdmin() && ui.me !== captainOf(store.config, Number(team))) return;
   saveSetup((c) => {
     if (edit === 'team-name' && c.teams[team]) c.teams[team].name = el.value.trim() || `Team ${playerName(c.teams[team].players[0])}`;
