@@ -372,7 +372,7 @@ export function birdieCounts(config, scores, playerIds) {
   const counts = {};
   playerIds.forEach((p) => { counts[p] = { id: p, birdies: 0 }; });
   for (const round of config.rounds) {
-    if (!round.enabled || round.format === 'stroke') continue;
+    if (!round.enabled || (round.format === 'stroke' && !round.birdies)) continue;
     for (const [pid, holes] of Object.entries(scores[round.id] || {})) {
       if (!counts[pid]) continue;
       for (const [hole, score] of Object.entries(holes)) {

@@ -5,7 +5,7 @@ import {
   matchStreak, birdieStreak, highlights, longestBirdieRun, longestMatchRun,
   captainRound, draftState, computeSkins, settleUp, roundPoints, tueDraftState, bonusPoints,
 } from '../js/scoring.js';
-import { DEFAULT_CONFIG, PLAYERS, ROTATION } from '../js/data.js';
+import { DEFAULT_CONFIG, PLAYERS, ROTATION } from '../js/trips/wa-id-2026.js';
 
 const IDS = PLAYERS.map((p) => p.id);
 const holes = (arr, start = 1) => Object.fromEntries(arr.map((v, i) => [start + i, v]));

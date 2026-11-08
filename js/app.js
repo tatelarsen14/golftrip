@@ -1,21 +1,25 @@
 import { createStore, MAX_VIDEO_MB } from './store.js';
-import { PLAYERS, TEAM_COLORS, TRIP, ITINERARY, FLIGHTS, HOLE_HANDICAPS } from './data.js';
+import {
+  PLAYERS, TEAM_COLORS, TRIP, ITINERARY, FLIGHTS, HOLE_HANDICAPS, TRIPS, CURRENT_TRIP, ACTIVE_TRIP, IS_CURRENT_TRIP,
+  TRIP_MODE, UI_KEY, SEEN_KEY, tripHref,
+} from './data.js';
 import {
   buildMatches, computeMatch, computeStandings, birdieCounts, parFor, scoreMark, rankTeams, resolveConfig,
   TIEBREAKERS, puttoffKey, holesOf, halvesOf, groupRoster, roundPoints, ESCALATING_BACK_POINTS, TEAMSTROKE_POINTS,
   BIRDIE_POINTS, ACE_POINTS, bonusPoints, STROKES_PER_NINE, TEAMSTROKE_STROKES, HCP_BUCKETS, isTeamMatch, netScore,
   matchStreak, birdieStreak, highlights, longestBirdieRun, longestMatchRun, roundTotals,
-  captainRound, draftState, computeSkins, settleUp, tueDraftState, hardestHoles,
+  captainRound, draftState, computeSkins, settleUp, tueDraftState, hardestHoles, isScore,
 } from './scoring.js';
 import { SCOUTING, HIGHLIGHTS, DRAFT_THEME } from './draftkit.js';
 
-const UI_KEY = 'golftrip:ui';
+// Everyone for themselves (no teams, draft or Cup): the board ranks players instead.
+const SOLO = TRIP_MODE === 'solo';
 // Setup only shows on phones where the organizer picked his own name.
 const ORGANIZER = 'tate';
 const PLAYER_IDS = PLAYERS.map((p) => p.id);
 const SKIN_STAKE = 5;
 // Shown at the bottom of the Trip tab, to check a phone has the latest version.
-const APP_VERSION = 'Oct 8 · Final';
+const APP_VERSION = 'Nov 8 · Trips';
 const app = document.getElementById('app');
 
 let store;
@@ -158,7 +162,7 @@ function groupTitle(round, gi) {
   return `Group ${gi + 1}${round.tees?.[gi] ? ` · ${esc(round.tees[gi])}` : ''}`;
 }
 
-const FORMAT_LABELS = { stroke: 'Captain Round', match: 'Match play', teamstroke: 'Team stroke play', escalating: 'Escalating singles' };
+const FORMAT_LABELS = { stroke: SOLO ? 'Stroke play' : 'Captain Round', match: 'Match play', teamstroke: 'Team stroke play', escalating: 'Escalating singles' };
 
 // Shown in place of a round's matches until its matchups are set.
 function pendingNote(config, round) {
@@ -235,6 +239,7 @@ function matchCard(match, res, { compact = false } = {}) {
 // True once every match of every counting round is final.
 function tripFinal(config, scores) {
   const rounds = enabledRounds(config);
+  if (SOLO) return rounds.length > 0 && rounds.every((r) => roundComplete(config, r));
   const matches = buildMatches(config);
   return matches.length > 0 && !rounds.some((r) => r.pending)
     && matches.every((m) => computeMatch(m, scores[m.roundId]).done);
@@ -474,7 +479,8 @@ function yourMatchCard(config, standings) {
   const gi = me && !next.pending ? next.groups.findIndex((g) => inGroup(config, g, me)) : -1;
   if (gi >= 0 && next.format === 'stroke') {
     const others = next.groups[gi].players.filter((p) => p !== me).map((p) => esc(playerName(p)));
-    sub = `${next.tees?.[gi] ? `${esc(next.tees[gi])} · ` : ''}Captain Round with ${others.join(' & ')} · low 2 are captains`;
+    sub = `${next.tees?.[gi] ? `${esc(next.tees[gi])} · ` : ''}${SOLO ? `Stroke play with ${others.join(', ').replace(/, ([^,]*)$/, ' & $1')}`
+      : `Captain Round with ${others.join(' & ')} · low 2 are captains`}`;
   } else if (gi >= 0) {
     const g = next.groups[gi];
     const mine = g.a.includes(me) ? g.a : g.b;
@@ -517,6 +523,12 @@ function todayMatchCard(config, standings, round, me) {
   if (gi < 0) return '';
   const tee = round.tees?.[gi];
   const go = `<button class="btn yours-go" data-action="go-scores" data-round="${round.id}" data-group="${gi}">Enter scores →</button>`;
+  if (round.format === 'stroke' && SOLO) {
+    const r = soloStandings(config, [round]).rows.find((x) => x.id === me);
+    return `<div class="yours card"><div class="yours-kicker">${kicker}</div>
+      <div class="yours-title">Stroke play${tee ? ` · ${esc(tee)}` : ''}</div>
+      <p class="muted">${r?.done ? `You shot <b>${r.gross}</b> (${fmtToPar(r.toPar)}).` : r?.thru ? `You're <b>${fmtToPar(r.toPar)}</b> thru ${r.thru}.` : 'Every stroke counts.'}</p>${go}</div>`;
+  }
   if (round.format === 'stroke') {
     const r = draft.cr?.rows.find((x) => x.id === me);
     return `<div class="yours card"><div class="yours-kicker">${kicker}</div>
@@ -552,7 +564,8 @@ function todayMatchCard(config, standings, round, me) {
 // ---------- Friday: Captain Round and the draft ----------
 
 // Friday's stroke play board: live to par, then final with the captains.
-function captainBoard(config) {
+function captainBoard(config, round) {
+  if (SOLO) return round ? soloBoard(config, [round], round) : '';
   const cr = draft.cr;
   if (!cr) return '';
   const started = cr.rows.some((r) => r.thru);
@@ -780,9 +793,174 @@ function birdieBoard(config, birdies) {
   </div>`;
 }
 
+// ---------- Solo trips: everyone for themselves ----------
+
+// Stroke play standings over some rounds: total to par, then holes played.
+function soloStandings(config, rounds) {
+  const rows = PLAYER_IDS.map((id) => {
+    const per = rounds.map((round) => {
+      const sc = store.scores[round.id]?.[id] || {};
+      const pars = config.pars?.[round.id] || {};
+      const played = holesOf(round).filter((h) => isScore(sc[h]));
+      return {
+        id: round.id,
+        thru: played.length,
+        gross: played.reduce((a, h) => a + sc[h], 0),
+        toPar: played.reduce((a, h) => a + sc[h] - (pars[h] || 0), 0),
+        done: played.length === holesOf(round).length,
+      };
+    });
+    const live = [...per].reverse().find((p) => p.thru && !p.done);
+    return {
+      id,
+      per,
+      thru: per.reduce((a, p) => a + p.thru, 0),
+      gross: per.reduce((a, p) => a + p.gross, 0),
+      toPar: per.reduce((a, p) => a + p.toPar, 0),
+      done: per.every((p) => p.done),
+      // Where they are now: holes into today's round, or F once it's in.
+      now: live ? String(live.thru) : per.some((p) => p.thru) ? 'F' : '',
+    };
+  });
+  rows.sort((a, b) => (b.thru > 0) - (a.thru > 0) || a.toPar - b.toPar || b.thru - a.thru);
+  rows.forEach((r, i) => {
+    const prev = rows[i - 1];
+    r.rank = prev && prev.thru && r.thru && prev.toPar === r.toPar ? prev.rank : i + 1;
+  });
+  rows.forEach((r) => { r.tied = !!r.thru && rows.filter((x) => x.thru && x.rank === r.rank).length > 1; });
+  return { rows, started: rows.some((r) => r.thru), final: rows.every((r) => r.done) };
+}
+
+// A normal scorecard for a round: actual scores, birdies circled, bogeys
+// squared, with out, in and total.
+function strokeGrid(config, round, ids) {
+  const holes = holesOf(round);
+  const [front, back] = halvesOf(round);
+  const pars = config.pars?.[round.id] || {};
+  const sum = (hs, get) => hs.reduce((a, h) => a + (get(h) || 0), 0);
+  const cols = (get, sub) => `${front.map((h) => `<td>${get(h)}</td>`).join('')}<td class="ms-sum">${sub(front)}</td>
+    ${back.map((h) => `<td>${get(h)}</td>`).join('')}<td class="ms-sum">${sub(back)}</td><td class="ms-sum">${sub(holes)}</td>`;
+  const grid = ids.map((id) => {
+    const sc = store.scores[round.id]?.[id] || {};
+    return `<tr><th>${esc(playerName(id).toUpperCase())}</th>${cols((h) => marked(sc[h], pars[h]), (hs) => sum(hs, (h) => sc[h]) || '')}</tr>`;
+  }).join('');
+  return `<div class="ms-big"><table>
+      <tr class="ms-hole"><th>HOLE</th>${front.map((h) => `<td>${h}</td>`).join('')}<td>OUT</td>${back.map((h) => `<td>${h}</td>`).join('')}<td>IN</td><td>TOT</td></tr>
+      <tr class="ms-parrow"><th>PAR</th>${cols((h) => pars[h] ?? '', (hs) => sum(hs, (h) => pars[h]))}</tr>
+      ${grid}</table></div>`;
+}
+
+// Masters-style leaders over the given rounds, plus the scorecard for one.
+function soloBoard(config, rounds, gridRound) {
+  if (!rounds.length) return '';
+  const st = soloStandings(config, rounds);
+  const num = (v) => `<span class="${v < 0 ? 'ms-red' : 'ms-grn'}">${v === 0 ? 'E' : v < 0 ? -v : `+${v}`}</span>`;
+  const multi = rounds.length > 1;
+  const rows = st.rows.map((r, i) => {
+    const winner = st.final && r.rank === 1 && !r.tied;
+    const rnds = multi ? r.per.map((p, ri) => (p.thru ? `R${ri + 1} ${p.gross}${p.done ? '' : '*'}` : '')).filter(Boolean).join(' · ') : '';
+    return `<div class="ms-row ${winner || (!st.final && i === 0 && r.thru) ? 'cap' : ''}">
+      <span class="ms-pos">${r.thru ? `${r.tied ? 'T' : ''}${r.rank}` : ''}</span>
+      <span class="ms-name">${esc(playerName(r.id).toUpperCase())}${winner ? ' 🏆' : ''}${rnds ? `<small>${rnds}</small>` : ''}</span>
+      <span class="ms-par">${r.thru ? num(r.toPar) : '<span class="ms-grn">–</span>'}</span>
+      <span class="ms-thru">${r.now}</span>
+      <span class="ms-tot">${r.thru ? r.gross : ''}</span>
+    </div>`;
+  }).join('');
+  const gridStarted = gridRound && st.rows.some((r) => r.per[rounds.indexOf(gridRound)]?.thru);
+  const label = multi ? `${rounds.length} rounds · ${rounds.reduce((a, r) => a + holesOf(r).length, 0)} holes` : `${esc(rounds[0].course)} · ${roundDay(rounds[0])}`;
+  const sub = st.final ? 'Final. Low total wins.' : st.started ? 'Live. Every stroke counts; low total wins.'
+    : multi ? 'Straight stroke play for now. Low total over every round wins.' : 'Straight stroke play.';
+  return `<div class="card cr-card masters">
+    <div class="ms-top"><span class="ms-title">Leaders</span><span class="ms-course">${label}</span></div>
+    <div class="ms-board">
+      <div class="ms-row ms-cols"><span class="ms-pos">Pos</span><span class="ms-name">Player</span><span class="ms-par">Score</span><span class="ms-thru">Thru</span><span class="ms-tot">Tot</span></div>
+      ${rows}
+    </div>
+    ${gridStarted ? strokeGrid(config, gridRound, st.rows.map((r) => r.id)) : ''}
+    <p class="ms-sub">${sub}</p>
+  </div>`;
+}
+
+// The Leaderboard for a solo trip: the overall leaders, each day's board,
+// skins and birdies.
+function renderSoloBoard() {
+  const config = view;
+  const { scores } = store;
+  const rounds = enabledRounds(config);
+  const round = currentRound();
+  const st = soloStandings(config, rounds);
+  const birdies = Object.values(birdieCounts(config, scores, PLAYER_IDS)).sort((a, b) => (
+    b.birdies - a.birdies || playerName(a.id).localeCompare(playerName(b.id))));
+  const champ = st.final && st.rows[0] && !st.rows[0].tied ? st.rows[0] : null;
+  const champBanner = champ ? `<div class="champ">
+      <div class="champ-cup">🏆</div>
+      <div><div class="champ-name">${esc(playerName(champ.id))} wins the ${esc(TRIP.name)}</div>
+      <div class="champ-sub">${champ.gross} (${fmtToPar(champ.toPar)}) over ${rounds.length} rounds</div></div>
+    </div>` : '';
+  return `
+    ${champBanner}
+    ${yourMatchCard(config, { matches: [] })}
+    <section>
+      <h2>The ${esc(TRIP.name)}</h2>
+      ${soloBoard(config, rounds, null)}
+      <div class="info-toggles">
+        <button class="info-btn ${ui.info === 'format' ? 'on' : ''}" data-action="info" data-id="format">Format ${ui.info === 'format' ? '▴' : '▾'}</button>
+      </div>
+      ${ui.info === 'format' ? `<div class="info-panel">
+        <p><b>Everyone for themselves.</b> The match format is still being decided. For now each round is straight stroke play
+          and the board adds up every stroke: lowest total over ${rounds.map((r) => esc(r.course)).join(' and ')} wins.</p>
+        <p><b>Skins:</b> par 3s, $${SKIN_STAKE} a player.</p>
+      </div>` : ''}
+    </section>
+    <section>
+      <h2>By round</h2>
+      ${roundChips(round?.id)}
+      ${round ? soloBoard(config, [round], round) : '<p class="empty">No rounds enabled.</p>'}
+    </section>
+    <section>
+      <h2>Skins 💰</h2>
+      ${skinsCard(config)}
+    </section>
+    <section>
+      <h2>Birdie Board 🐦</h2>
+      ${birdieBoard(config, birdies)}
+    </section>`;
+}
+
+// One line on how a trip ended, for the Final strip and the trip list.
+function tripResult(trip, config, scores) {
+  if (trip !== ACTIVE_TRIP) return trip.RESULT || '';
+  if (SOLO) {
+    const st = soloStandings(config, enabledRounds(config));
+    const top = st.rows[0];
+    if (!st.final || !top) return 'This trip is over';
+    return top.tied ? `Tied at ${top.gross}` : `${playerName(top.id)} wins at ${top.gross} (${fmtToPar(top.toPar)})`;
+  }
+  if (config.teams?.length !== 2) return 'This trip is over';
+  const [a, b] = computeStandings(config, scores).teams;
+  const [w, l] = a.points >= b.points ? [a, b] : [b, a];
+  return a.points === b.points ? `Tied ${fmtHalf(a.points)}–${fmtHalf(b.points)}` : `${w.name} wins ${fmtHalf(w.points)}–${fmtHalf(l.points)}`;
+}
+
+// Every trip on the app, newest first, on the Trip tab.
+function tripsCard() {
+  return `<h2>All trips</h2>
+    <div class="card trips">${TRIPS.map((t) => {
+      const on = t === ACTIVE_TRIP;
+      const sub = [t.TRIP.short, t.TRIP.shortDates, t.TRIP.year].filter(Boolean).join(' · ');
+      const result = t.LOCKED ? tripResult(t, view, store.scores) : t === CURRENT_TRIP ? 'Up next' : '';
+      return `<a class="trip-row ${on ? 'on' : ''}" href="${tripHref(t)}">
+        <div><b>${esc(t.TRIP.name)}</b><small>${esc(sub)}</small></div>
+        <span>${on ? 'Viewing' : `${esc(result || 'Open')} →`}</span>
+      </a>`;
+    }).join('')}</div>`;
+}
+
 // ---------- Leaderboard ----------
 
 function renderBoard() {
+  if (SOLO) return renderSoloBoard();
   const config = view;
   const { scores } = store;
   const standings = computeStandings(config, scores);
@@ -879,7 +1057,7 @@ function renderBoard() {
   } else if (round.pending) matchesHtml = round.needsPicks && featureKind === 'tue' ? '<div class="card tbd"><div class="tbd-title">Matchups being set</div><p>See the top of the Leaderboard.</p></div>' : pendingNote(config, round);
   else {
     matchesHtml = `${round.format === 'escalating' ? tueReplayCard(round) : ''}<div class="bc-wrap">
-      <div class="bc-top"><span>Buckle Up · ${esc(FORMAT_LABELS[round.format])}</span>
+      <div class="bc-top"><span>${esc(TRIP.name)} · ${esc(FORMAT_LABELS[round.format])}</span>
         ${roundMatches.some((m) => (m.result.played > 0 || m.result.projected) && !m.result.done) ? '<span class="bc-live">LIVE</span>' : ''}</div>
       ${round.format === 'teamstroke'
         ? `<div class="bc-session"><span>${roundDay(round)} · ${esc(round.course)}</span><span>All four count · net</span></div>
@@ -1204,7 +1382,7 @@ function renderScores() {
 function segmentLabel(round, hole) {
   const [front] = halvesOf(round);
   const isFront = front.includes(hole);
-  if (round.format === 'stroke') return ['Stroke play', 'Captain Round'];
+  if (round.format === 'stroke') return ['Stroke play', SOLO ? 'Stroke play' : 'Captain Round'];
   if (round.format === 'teamstroke') return ['Team stroke', 'Team stroke play'];
   if (round.format === 'escalating') return isFront ? ['Singles · 1 pt', 'Front 9 singles'] : [`Singles · ${ESCALATING_BACK_POINTS} pt${ESCALATING_BACK_POINTS === 1 ? '' : 's'}`, 'Back 9 singles'];
   return isFront ? ['Best Ball', 'Best ball match'] : ['Singles', 'Singles matches'];
@@ -1284,7 +1462,7 @@ function renderEntry() {
   const skinHole = round.skins === 'all' || (round.skins === 'par3' && par === 3);
   let below = '';
   if (round.format === 'stroke') {
-    below = captainBoard(config);
+    below = captainBoard(config, round);
   } else {
     below = `<div class="bc-wrap bc-mini">
       <div class="bc-session"><span>${segment}</span><span>${round.format === 'teamstroke' ? 'Both groups' : groupTitle(round, ui.group)}</span></div>
@@ -1393,7 +1571,7 @@ function renderCards() {
   const matches = buildMatches(config).filter((m) => m.roundId === round.id);
   let extra = '';
   if (round.format === 'stroke') {
-    extra = captainBoard(config);
+    extra = captainBoard(config, round);
   } else if (round.format === 'teamstroke') {
     extra = `<h2>Team totals</h2><div class="bc-wrap">${matches.map((m) => strokeCard(config, m, computeMatch(m, roundScores))).join('')}</div>`;
   } else {
@@ -1435,8 +1613,9 @@ function renderTrip() {
           ${d.stay ? `<li><span class="ico">🛏️</span><div>Stay: <b>${esc(d.stay.name)}</b></div></li>` : ''}
         </ul>
       </article>`).join('')}
-    <h2>Flights</h2>
-    <div class="card">${FLIGHTS.map((f) => `<div class="kv"><b>✈️ ${f.route}</b><span>${f.when}</span></div>`).join('')}</div>
+    ${FLIGHTS.length ? `<h2>Flights</h2>
+    <div class="card">${FLIGHTS.map((f) => `<div class="kv"><b>✈️ ${f.route}</b><span>${f.when}</span></div>`).join('')}</div>` : ''}
+    ${tripsCard()}
     <p class="app-version">App version ${APP_VERSION}</p>`;
 }
 
@@ -1451,7 +1630,7 @@ function renderSetup() {
   const manual = config.draft?.captains || [];
   const fri = config.rounds.find((r) => r.format === 'stroke');
 
-  const draftStatus = d.stage === 'captains'
+  const draftStatus = SOLO ? '' : d.stage === 'captains'
     ? (d.cr?.allDone ? 'Tied for a captain spot: waiting on the putt-off.' : "Waiting on Friday's scores.")
     : `Captains: <b>${name(d.captains[0])}</b> (picks first) and <b>${name(d.captains[1])}</b>${d.manual ? ' · set by hand' : ' · from Friday'}.
       ${d.stage === 'done' ? 'Draft complete.' : config.draft?.started ? `Draft is live: ${d.picks.length} of ${PLAYER_IDS.length - 2} picks made.` : 'Draft not started yet.'}`;
@@ -1464,7 +1643,7 @@ function renderSetup() {
       <button class="btn ghost" data-action="tab" data-tab="recap">Preview trip recap</button>
     </div>
 
-    <h2>Captains &amp; draft</h2>
+    ${SOLO ? '' : `<h2>Captains &amp; draft</h2>
     <div class="card">
       <p class="setup-p">${draftStatus}</p>
       <p class="note">Set the captains by hand (say, if Friday gets rained out): tap the one who picks first, then the other.</p>
@@ -1496,10 +1675,10 @@ function renderSetup() {
     <div class="card"><div class="two">${(fri?.groups || []).map((g, gi) => `<div>
       <div class="setup-sub">Group ${gi + 1}</div>
       <div class="stack">${g.players.map((pid, si) => chip('fri', gi, si, pid)).join('')}</div>
-    </div>`).join('')}</div></div>
+    </div>`).join('')}</div></div>`}
 
     <h2>Handicaps</h2>
-    <p class="note">Tap a player to switch him between a 3 and a 12. 12s get ${STROKES_PER_NINE} strokes a nine against 3s in matches, and take ${TEAMSTROKE_STROKES} off at Quicksands. Changes save for everyone right away.</p>
+    <p class="note">Tap a player to switch him between a 3 and a 12. 12s get ${STROKES_PER_NINE} strokes a nine against 3s in matches${SOLO ? '' : `, and take ${TEAMSTROKE_STROKES} off at Quicksands`}. Changes save for everyone right away.</p>
     <div class="card"><div class="two">${HCP_BUCKETS.map((b) => `<div>
       <div class="setup-sub">${b}s</div>
       <div class="stack">${PLAYERS.filter((p) => (config.hcp?.[p.id] ?? HCP_BUCKETS[0]) === b).map((p) => `
@@ -1523,7 +1702,8 @@ function renderSetup() {
       } else if (r.format === 'teamstroke') {
         detail = `<div class="singles-line">Team stroke play (net), ${TEAMSTROKE_POINTS} pts, plus ${BIRDIE_POINTS} for most birdies. Groups are Gamble Sands' groups.</div>`;
       } else if (r.format === 'stroke') {
-        detail = '<div class="singles-line">Captain Round: no points, no skins.</div>';
+        detail = SOLO ? `<div class="singles-line">Stroke play for now: every stroke counts${r.skins ? ', skins on par 3s' : ''}.</div>`
+          : '<div class="singles-line">Captain Round: no points, no skins.</div>';
       }
       return `<div class="card setup-round ${r.enabled ? '' : 'off'}">
         <label class="toggle"><input type="checkbox" data-edit="round-enabled" data-round="${ri}" ${r.enabled ? 'checked' : ''}>
@@ -1868,7 +2048,7 @@ function renderRecap() {
   return `
     ${final ? '' : '<div class="card tbd"><div class="tbd-title">Preview</div><p>The recap fills in as the trip goes and is final after the last match.</p></div>'}
     <div class="recap-hero">
-      <div class="rh-kicker">Buckle Up · ${esc(TRIP.dates)}</div>
+      <div class="rh-kicker">${esc(TRIP.name)} · ${esc(TRIP.dates)}</div>
       <div class="rh-title">Trip Recap</div>
       ${champ && final && !champ.unresolved ? `<div class="rh-champ">🏆 ${esc(champ.name)} · ${champ.players.map(playerName).join(', ')}</div>` : ''}
       <button class="btn ghost small" data-action="share-recap">Share</button>
@@ -2667,7 +2847,6 @@ function pickReveal(n, { replay = false } = {}) {
 // Banners only show for things that just happened: never seen on this phone
 // (remembered across app restarts) and from the last 15 minutes. The first
 // time a phone opens the app, everything so far is marked seen silently.
-const SEEN_KEY = 'golftrip:seen';
 const RECENT_MS = 15 * 60 * 1000;
 let seen = (() => {
   try {
@@ -2764,7 +2943,7 @@ function matchBanner(m, res) {
 
 function championBanner(team) {
   return {
-    color: teamColor(team.idx), kicker: 'Buckle Up · Final', title: `${esc(team.name)} win the Cup`,
+    color: teamColor(team.idx), kicker: `${TRIP.name} · Final`, title: `${esc(team.name)} win the Cup`,
     score: '🏆', sub: esc(team.players.map(playerName).join(', ')), big: true,
   };
 }
@@ -2813,12 +2992,8 @@ const HIDDEN_TABS = [['recap', '', 'Recap', renderRecap]];
 // The finished trip's result, pinned under the header.
 function finalStrip() {
   const config = view;
-  if (config.teams?.length !== 2) return '<div class="final-strip"><b>Final</b><span>This trip is over</span></div>';
-  const [a, b] = computeStandings(config, store.scores).teams;
-  const [w, l] = a.points >= b.points ? [a, b] : [b, a];
-  const tie = a.points === b.points;
-  return `<div class="final-strip"><b>Final</b><span>${tie ? `Tied ${fmtHalf(a.points)}–${fmtHalf(b.points)}`
-    : `${esc(w.name)} wins ${fmtHalf(w.points)}–${fmtHalf(l.points)}`}</span></div>`;
+  const back = IS_CURRENT_TRIP ? '' : `<a class="final-back" href="${tripHref(CURRENT_TRIP)}">← ${esc(CURRENT_TRIP.TRIP.name)}</a>`;
+  return `<div class="final-strip"><b>Final</b><span>${esc(tripResult(ACTIVE_TRIP, config, store.scores))}</span>${back}</div>`;
 }
 
 function render() {
@@ -2829,7 +3004,7 @@ function render() {
   }
   renderQueued = false;
   view = resolveConfig(store.config, store.scores);
-  draft = draftState(store.config, store.scores, PLAYER_IDS);
+  draft = SOLO ? { stage: 'off', cr: null, captains: null, picks: [], manual: false } : draftState(store.config, store.scores, PLAYER_IDS);
   checkForFinishes();
   if (ui.tab === 'cards') { // Cards moved into Scores
     ui.tab = 'scores';
@@ -2852,7 +3027,7 @@ function render() {
   app.dataset.tab = tab[0];
   app.innerHTML = `
     <header class="top">
-      <div class="brand"><div class="wordmark">Buckle Up</div><div class="tagline">${esc(TRIP.short)} · ${esc(TRIP.shortDates)}</div></div>
+      <div class="brand"><div class="wordmark ${TRIP.name.length > 12 ? 'long' : ''}">${esc(TRIP.name)}</div><div class="tagline">${esc(TRIP.short)} · ${esc(TRIP.shortDates)}</div></div>
       <button class="me-chip" data-action="change-me" aria-label="Change name">${sync}<span>${who}</span><span class="caret">▾</span></button>
     </header>
     ${locked() ? finalStrip() : ''}
@@ -3001,7 +3176,7 @@ app.addEventListener('click', async (e) => {
       return;
     case 'share-recap': {
       const url = `${location.origin}${location.pathname}#recap`;
-      if (navigator.share) navigator.share({ title: 'Buckle Up · Trip Recap', url }).catch(() => {});
+      if (navigator.share) navigator.share({ title: `${TRIP.name} · Trip Recap`, url }).catch(() => {});
       else navigator.clipboard?.writeText(url).then(() => toast('Link copied ✓'));
       return;
     }

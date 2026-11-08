@@ -85,9 +85,28 @@ at Quicksands (32 in all). All 8 players on the same hole. Once everyone's in, t
 outright low score wins $5 from each of the other 7; any tie and nobody wins it; nothing
 carries. The Leaderboard shows everyone's net and a settle-up list; wins post to the Feed.
 
+## Trips
+
+Every trip has its own file in `js/trips/` (players, courses, pars, hole
+handicaps, itinerary, format) and its own Firestore slot, `trips/{ID}`, so a
+new trip never touches an old one. `js/data.js` lists them, newest first; the
+first is the current trip and is what the plain link opens. Older trips open
+with `?trip=<id>` (the Trip tab lists them all under "All trips").
+
+- **Pre Turkey Classic** (`turkey-2026`, current): Tate, Garrett, Brody and
+  Jonah at Sky Mountain (Sun Nov 22) and Copper Rock (Mon Nov 23). `MODE:
+  'solo'`: no teams, draft or Cup; until the format is decided both rounds are
+  straight stroke play with a Masters-style board over both days, skins on par
+  3s and the birdie board. Copper Rock's pars and hole handicaps are
+  placeholders until we have the real card.
+- **Buckle Up** (`wa-id-2026`): the WA / ID trip, `MODE: 'cup'`, locked.
+
+To add a trip: copy a trip file, give it a new `ID`, and put it first in
+`TRIPS` in `js/data.js`. Set `LOCKED: true` on the old one when it's over.
+
 ## Locked after the trip
 
-`TRIP_LOCKED` in `js/firebase-config.js` makes the app read-only once a trip is
+`LOCKED` in a trip's file makes the app read-only for that trip once it's
 over: a Final banner up top, no score entry, posting, reactions, Setup tab or
 draft controls, and the store refuses every write. Everything stays viewable,
 including the draft and Tuesday pick replays. Set it to `false` to reopen.

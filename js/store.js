@@ -8,8 +8,8 @@
 // social[itemId] = { r: { emoji: [playerId] }, c: [{ by, text, at }] }
 //   (reactions and comments for posts and auto highlights alike)
 
-import { FIREBASE_CONFIG, TRIP_ID, TRIP_LOCKED } from './firebase-config.js';
-import { DEFAULT_CONFIG } from './data.js';
+import { FIREBASE_CONFIG } from './firebase-config.js';
+import { DEFAULT_CONFIG, TRIP_ID, TRIP_LOCKED } from './data.js';
 
 const FIREBASE_VERSION = '10.12.2';
 const LOCAL_KEY = `golftrip:${TRIP_ID}`;
