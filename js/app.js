@@ -9,7 +9,7 @@ import {
   TIEBREAKERS, puttoffKey, holesOf, halvesOf, groupRoster, roundPoints, ESCALATING_BACK_POINTS, TEAMSTROKE_POINTS,
   BIRDIE_POINTS, ACE_POINTS, bonusPoints, STROKES_PER_NINE, TEAMSTROKE_STROKES, HCP_BUCKETS, isTeamMatch, netScore,
   matchStreak, birdieStreak, highlights, longestBirdieRun, longestMatchRun, roundTotals,
-  captainRound, draftState, computeSkins, settleUp, tueDraftState, hardestHoles, isScore, soloTable,
+  captainRound, draftState, computeSkins, settleUp, tueDraftState, hardestHoles, isScore, soloTable, FINAL_NINE_POINTS,
 } from './scoring.js';
 import { SCOUTING, HIGHLIGHTS, DRAFT_THEME } from './draftkit.js';
 
@@ -20,7 +20,7 @@ const ORGANIZER = 'tate';
 const PLAYER_IDS = PLAYERS.map((p) => p.id);
 const SKIN_STAKE = 5;
 // Shown at the bottom of the Trip tab, to check a phone has the latest version.
-const APP_VERSION = 'Nov 9 · Turkey';
+const APP_VERSION = 'Nov 9 · History';
 const app = document.getElementById('app');
 
 let store;
@@ -895,7 +895,11 @@ function soloPoints(config, scores) {
 
 // One player's matches on a nine, for the countdown: who they're with and who they play.
 function nineLine(nine, me, label) {
-  if (!nine?.a) return `${label}: seeded by the standings`;
+  if (!nine?.singles) return `${label}: championship singles, seeded by the standings`;
+  if (!nine.a) {
+    const s = nine.singles.find((x) => x.a === me || x.b === me);
+    return `${label}: championship singles${s ? ` v ${esc(playerName(s.a === me ? s.b : s.a))}` : ''} · ${nine.weight} pts`;
+  }
   const mine = nine.a.includes(me) ? nine.a : nine.b;
   const opp = mine === nine.a ? nine.b : nine.a;
   const s = nine.singles.find((x) => x.a === me || x.b === me);
@@ -918,7 +922,8 @@ function renderSoloBoard() {
   const birdies = Object.values(birdieCounts(config, scores, PLAYER_IDS)).sort((a, b) => (
     b.birdies - a.birdies || playerName(a.id).localeCompare(playerName(b.id))));
   const started = table.some((r) => r.played);
-  const total = 2 * rounds.length * 2; // best ball + singles, two nines a round
+  // Most a player can win: 2 a nine (best ball + singles), or the championship nine's singles.
+  const total = rounds.reduce((a, r) => a + r.groups[0].nines.reduce((x, n) => x + (n.seed || n.seeded ? FINAL_NINE_POINTS : 2), 0), 0);
   const rows = table.map((r, i) => {
     const same = (x) => x.points === r.points && x.strokes === r.strokes;
     const rank = table.findIndex(same) + 1;
@@ -948,9 +953,9 @@ function renderSoloBoard() {
         ${ms.some((m) => m.result.played > 0 && !m.result.done) ? '<span class="bc-live">LIVE</span>' : ''}</div>
       ${round.groups.map((g, gi) => (g.nines || []).map((n, ni) => `
         <div class="bc-session"><span>${roundDay(round)} · ${esc(round.course)}</span><span>${ni ? 'Back' : 'Front'} 9</span></div>
-        ${n.a ? ms.filter((m) => m.match.group === gi && m.match.nine === ni).map((m) => broadcastCard(config, m.match, m.result)).join('')
-          : `<div class="card tbd"><div class="tbd-title">Seeded by the standings</div>
-            <p>Once the first three nines are final: 1st &amp; 4th v 2nd &amp; 3rd in best ball, singles 1st v 2nd and 4th v 3rd.</p></div>`}`).join('')).join('')}
+        ${n.singles ? ms.filter((m) => m.match.group === gi && m.match.nine === ni).map((m) => broadcastCard(config, m.match, m.result)).join('')
+          : `<div class="card tbd"><div class="tbd-title">Championship singles</div>
+            <p>Set once the first three nines are final: 1st v 2nd and 3rd v 4th, ${FINAL_NINE_POINTS} points a match.</p></div>`}`).join('')).join('')}
     </div>`;
   }
 
@@ -960,7 +965,7 @@ function renderSoloBoard() {
     <section>
       <h2>The ${esc(TRIP.name)}</h2>
       <div class="card cr-card masters">
-        <div class="ms-top"><span class="ms-title">Standings</span><span class="ms-course">${total} matches each · ${rounds.length} rounds</span></div>
+        <div class="ms-top"><span class="ms-title">Standings</span><span class="ms-course">${total} pts max · ${rounds.length} rounds</span></div>
         <div class="ms-board solo-pts">
           <div class="ms-row ms-cols"><span class="ms-pos">Pos</span><span class="ms-name">Player</span><span class="ms-par">Pts</span><span class="ms-thru">W-L-H</span></div>
           ${rows}
@@ -973,9 +978,9 @@ function renderSoloBoard() {
       ${ui.info === 'format' ? `<div class="info-panel">
         <p><b>Everyone for themselves.</b> Every nine, the foursome plays a 2 v 2 <b>best ball</b> and two <b>singles</b> matches at the same time.</p>
         <ul>
-          <li><b>Points:</b> win a match = 1 point, halve = ½. Best ball points go to both partners, so you can win up to 2 a nine and ${total} in all.</li>
+          <li><b>Points:</b> win a match = 1 point, halve = ½. Best ball points go to both partners, so you can win up to 2 a nine.</li>
           <li><b>First three nines:</b> partners rotate so you play with everyone once and against everyone once in singles.</li>
-          <li><b>Last nine (Copper Rock back):</b> seeded by the standings. 1st &amp; 4th v 2nd &amp; 3rd in best ball; singles 1st v 2nd and 4th v 3rd.</li>
+          <li><b>Championship nine (Copper Rock back):</b> singles only, seeded by the standings: 1st v 2nd and 3rd v 4th, worth ${FINAL_NINE_POINTS} points (halve = 1 each). ${total} points max in all.</li>
           <li><b>Winner:</b> most points. Tied: fewest total strokes, then a putt-off.</li>
           <li><b>Skins:</b> par 3s, $${SKIN_STAKE} a player.</li>
         </ul>
@@ -1928,9 +1933,9 @@ function renderSetup() {
       } else if (r.format === 'teamstroke') {
         detail = `<div class="singles-line">Team stroke play (net), ${TEAMSTROKE_POINTS} pts, plus ${BIRDIE_POINTS} for most birdies. Groups are Gamble Sands' groups.</div>`;
       } else if (r.format === 'nines') {
-        detail = resolved.groups.map((g) => g.nines.map((n, ni) => `<div class="singles-line">${ni ? 'Back' : 'Front'} 9: ${n.a
-          ? `best ball <b>${n.a.map(name).join(' & ')}</b> v <b>${n.b.map(name).join(' & ')}</b> · singles <b>${n.singles.map((s) => `${name(s.a)} v ${name(s.b)}`).join(', ')}</b>`
-          : 'seeded by the standings (1st & 4th v 2nd & 3rd)'}</div>`).join('')).join('');
+        detail = resolved.groups.map((g) => g.nines.map((n, ni) => `<div class="singles-line">${ni ? 'Back' : 'Front'} 9: ${!n.singles
+          ? `championship singles, seeded by the standings (1st v 2nd, 3rd v 4th, ${FINAL_NINE_POINTS} pts)`
+          : `${n.a ? `best ball <b>${n.a.map(name).join(' & ')}</b> v <b>${n.b.map(name).join(' & ')}</b> · ` : ''}${n.weight > 1 ? `championship singles (${n.weight} pts)` : 'singles'} <b>${n.singles.map((s) => `${name(s.a)} v ${name(s.b)}`).join(', ')}</b>`}</div>`).join('')).join('');
       } else if (r.format === 'stroke') {
         detail = SOLO ? `<div class="singles-line">Stroke play for now: every stroke counts${r.skins ? ', skins on par 3s' : ''}.</div>`
           : '<div class="singles-line">Captain Round: no points, no skins.</div>';

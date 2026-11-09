@@ -100,9 +100,9 @@ with `?trip=<id>` (the Trip tab lists them all under "All trips").
   is 1 point for the player (best ball: both partners), a halve ½, so 2 a nine
   and 8 in all. The first three nines rotate partners so everyone partners
   everyone once and plays everyone once in singles. The last nine (Copper Rock
-  back) is seeded once the first three are final: 1st & 4th v 2nd & 3rd, singles
-  1st v 2nd and 4th v 3rd. Most points wins; ties go to fewest strokes, then a
-  putt-off. Skins on par 3s, the birdie board and a total strokes board too.
+  back) is the championship nine, set once the first three are final: singles
+  only, 1st v 2nd and 3rd v 4th, worth 2 points each (8 max in all). Most points
+  wins; ties go to fewest strokes, then a putt-off. Skins on par 3s, the birdie board and a total strokes board too.
 - **Buckle Up** (`wa-id-2026`): the WA / ID trip, `MODE: 'cup'`, locked.
 
 To add a trip: copy a trip file, give it a new `ID`, and put it first in

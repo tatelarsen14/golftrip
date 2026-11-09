@@ -2,8 +2,8 @@
 // the four of us, everyone for themselves. Every nine is a 2 v 2 best ball
 // plus two singles in the same foursome; each win is a point for the player.
 // Partners rotate so everyone partners everyone once and plays everyone once
-// in singles over the first three nines. The last nine is seeded by the
-// standings: 1st & 4th v 2nd & 3rd, singles 1st v 2nd and 4th v 3rd.
+// in singles over the first three nines. The last nine is the championship
+// nine: singles only, seeded 1st v 2nd and 3rd v 4th, worth 2 points each.
 
 export const ID = 'turkey-2026';
 export const LOCKED = false;
@@ -90,7 +90,7 @@ export const ITINERARY = [
   {
     day: 'Monday', date: 'Nov 23', title: 'Copper Rock Golf Course',
     items: [
-      { icon: '⛳', time: '11:12 AM', text: 'Tee time — Copper Rock', sub: 'Free! · Front: Tate & Jonah v Garrett & Brody · Back: seeded by the standings' },
+      { icon: '⛳', time: '11:12 AM', text: 'Tee time — Copper Rock', sub: 'Free! · Front: Tate & Jonah v Garrett & Brody · Back: championship singles, 1st v 2nd & 3rd v 4th, 2 pts' },
     ],
   },
 ];

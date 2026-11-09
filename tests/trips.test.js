@@ -49,7 +49,7 @@ function card(roundId, tweaks = {}) {
   return Object.fromEntries(Object.entries(pars).map(([h, p]) => [h, p + (tweaks[h] || 0)]));
 }
 
-test('Pre Turkey Classic: the last nine is seeded 1st & 4th v 2nd & 3rd once the first three are final', () => {
+test('Pre Turkey Classic: the last nine is championship singles, 1st v 2nd and 3rd v 4th for 2 points', () => {
   // Tate birdies every hole he plays; Garrett bogeys every hole; Brody makes
   // one birdie on each nine; Jonah pars.
   const all = (d) => Object.fromEntries(Array.from({ length: 18 }, (_, i) => [i + 1, d]));
@@ -65,9 +65,16 @@ test('Pre Turkey Classic: the last nine is seeded 1st & 4th v 2nd & 3rd once the
   const [p1, p2, p3, p4] = table.map((x) => x.id);
   assert.equal(p1, 'tate');
   assert.equal(p4, 'garrett');
-  assert.deepEqual(last.a, [p1, p4]);
-  assert.deepEqual(last.b, [p2, p3]);
-  assert.deepEqual(last.singles, [{ a: p1, b: p2 }, { a: p4, b: p3 }]);
+  assert.equal(last.a, undefined); // no best ball
+  assert.deepEqual(last.singles, [{ a: p1, b: p2 }, { a: p3, b: p4 }]);
+  // Both final-nine matches are 2-point singles; Tate wins his for 8 in all.
+  const fin = buildMatches(r).filter((m) => m.roundId === 'copper' && m.nine === 1);
+  assert.equal(fin.length, 2);
+  assert.ok(fin.every((m) => m.type === 'singles' && m.weight === 2));
+  const full = { sky: mk('sky'), copper: mk('copper') };
+  const done = soloTable(buildMatches(resolveConfig(turkey.DEFAULT_CONFIG, full)), full, turkey.PLAYERS.map((p) => p.id));
+  assert.equal(done[0].id, 'tate');
+  assert.equal(done[0].points, 8);
   // Before the front 9 at Copper Rock is in, it's still waiting.
   scores = { sky: mk('sky') };
   assert.ok(resolveConfig(turkey.DEFAULT_CONFIG, scores).rounds[1].groups[0].nines[1].pending);

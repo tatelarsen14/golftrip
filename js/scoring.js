@@ -109,17 +109,19 @@ export function buildMatches(config) {
     }
     if (round.format === 'nines') {
       round.groups.forEach((g, gi) => (g.nines || []).forEach((nine, ni) => {
-        if (!nine?.a) return; // a seeded nine waits for the standings
+        if (!nine?.singles) return; // a seeded nine waits for the standings
         const holes = [front, back][ni];
         const nn = ni ? 'Back 9' : 'Front 9';
         const base = { roundId: round.id, group: gi, nine: ni, holes };
-        matches.push({
+        const w = nine.weight || 1;
+        if (nine.a) matches.push({
           ...base, id: `${round.id}-g${gi + 1}-n${ni + 1}-bb`, type: 'bestball', label: `Best Ball · ${nn}`,
           sides: [{ team: 0, players: [...nine.a] }, { team: 1, players: [...nine.b] }],
           strokes: matchStrokes(config, round.id, holes, [...nine.a, ...nine.b]),
         });
         nine.singles.forEach(({ a: x, b: y }, si) => matches.push({
-          ...base, id: `${round.id}-g${gi + 1}-n${ni + 1}-s${si + 1}`, type: 'singles', label: `Singles · ${nn}`,
+          ...base, id: `${round.id}-g${gi + 1}-n${ni + 1}-s${si + 1}`, type: 'singles', weight: w,
+          label: w > 1 ? `Championship Singles · ${nn} · ${w} pts` : `Singles · ${nn}`,
           sides: [{ team: 0, players: [x] }, { team: 1, players: [y] }],
           strokes: matchStrokes(config, round.id, holes, [x, y]),
         }));
@@ -595,11 +597,13 @@ export function resolveConfig(config, scores) {
 // Each nine is a 2 v 2 best ball (`a` v `b`) plus two singles inside the
 // foursome (`singles`: [{ a, b }], objects since Firestore can't nest arrays). Every
 // win is a point for the player (best ball: both partners), a halve is half.
-// A nine marked `seed` is set by the standings once every earlier nine is
-// final: 1st & 4th v 2nd & 3rd in best ball, singles 1st v 2nd and 4th v 3rd.
+// A nine marked `seed` is the championship nine, set by the standings once
+// every earlier nine is final: singles only, 1st v 2nd and 3rd v 4th, worth
+// 2 points each (a halve is 1 each).
+export const FINAL_NINE_POINTS = 2;
 
 export function seedNine([p1, p2, p3, p4]) {
-  return { a: [p1, p4], b: [p2, p3], singles: [{ a: p1, b: p2 }, { a: p4, b: p3 }], seeded: true };
+  return { singles: [{ a: p1, b: p2 }, { a: p3, b: p4 }], weight: FINAL_NINE_POINTS, seeded: true };
 }
 
 // Points table from a set of matches: points, then fewest strokes over the
