@@ -1091,3 +1091,7 @@ label.btn.disabled { opacity: .4; }
 
 /* Six tabs (Tate, with Setup): smaller labels so "Leaderboard" fits. */
 .tabs[style*="--n:6"] button { font-size: 9.5px; letter-spacing: -.01em; }
+
+/* A "to be set" note inside the dark scoreboard keeps dark, readable text. */
+.bc-wrap .tbd { color: #1d241f; }
+.bc-wrap .tbd p { font-size: 14px; line-height: 1.4; color: #3a443c; }
