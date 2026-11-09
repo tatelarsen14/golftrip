@@ -2,7 +2,7 @@ import { createStore, withDefaults, MAX_VIDEO_MB } from './store.js';
 import { tripSummary, allTime, headToHead as careerH2H } from './history.js';
 import {
   PLAYERS, TEAM_COLORS, TRIP, ITINERARY, FLIGHTS, HOLE_HANDICAPS, TRIPS, CURRENT_TRIP, ACTIVE_TRIP, IS_CURRENT_TRIP,
-  TRIP_MODE, UI_KEY, SEEN_KEY, tripHref,
+  TRIP_MODE, TRIP_FEED, UI_KEY, SEEN_KEY, tripHref,
 } from './data.js';
 import {
   buildMatches, computeMatch, computeStandings, birdieCounts, parFor, scoreMark, rankTeams, resolveConfig,
@@ -20,7 +20,7 @@ const ORGANIZER = 'tate';
 const PLAYER_IDS = PLAYERS.map((p) => p.id);
 const SKIN_STAKE = 5;
 // Shown at the bottom of the Trip tab, to check a phone has the latest version.
-const APP_VERSION = 'Nov 9 · History';
+const APP_VERSION = 'Nov 9 · No feed';
 const app = document.getElementById('app');
 
 let store;
@@ -3225,7 +3225,7 @@ function showNextCelebration() {
 const TABS = [
   ['board', '🏆', 'Leaderboard', renderBoard],
   ['scores', '✏️', 'Scores', renderScores],
-  ['feed', '💬', 'Feed', renderFeed],
+  ...(TRIP_FEED ? [['feed', '💬', 'Feed', renderFeed]] : []),
   ['trip', '🗺️', 'Trip', renderTrip],
   // History adds the current trip's live scores to the saved ones, so it lives on the current trip.
   ...(IS_CURRENT_TRIP ? [['history', '📜', 'History', renderHistory]] : []),

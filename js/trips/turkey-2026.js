@@ -8,6 +8,8 @@
 export const ID = 'turkey-2026';
 export const LOCKED = false;
 export const MODE = 'solo';
+// Small group: no Feed tab this trip.
+export const FEED = false;
 export const UI_KEY = `golftrip:ui:${ID}`;
 export const SEEN_KEY = `golftrip:seen:${ID}`;
 
