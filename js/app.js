@@ -1,4 +1,5 @@
-import { createStore, MAX_VIDEO_MB } from './store.js';
+import { createStore, withDefaults, MAX_VIDEO_MB } from './store.js';
+import { tripSummary, allTime, headToHead as careerH2H } from './history.js';
 import {
   PLAYERS, TEAM_COLORS, TRIP, ITINERARY, FLIGHTS, HOLE_HANDICAPS, TRIPS, CURRENT_TRIP, ACTIVE_TRIP, IS_CURRENT_TRIP,
   TRIP_MODE, UI_KEY, SEEN_KEY, tripHref,
@@ -1742,6 +1743,108 @@ function renderTrip() {
     <p class="app-version">App version ${APP_VERSION}</p>`;
 }
 
+// ---------- History: the record book across every trip ----------
+
+// Finished trips never change, so their summaries are worked out once.
+let pastSummaries = null;
+function historyBook() {
+  pastSummaries ||= Object.fromEntries(TRIPS.filter((t) => t !== ACTIVE_TRIP && t.SNAPSHOT)
+    .map((t) => [t.ID, tripSummary(t, withDefaults(t.SNAPSHOT.config, t.DEFAULT_CONFIG), t.SNAPSHOT.scores)]));
+  const trips = TRIPS.map((t) => (t === ACTIVE_TRIP ? tripSummary(t, store.config, store.scores) : pastSummaries[t.ID])).filter(Boolean);
+  return { trips, book: allTime(trips) };
+}
+
+function renderHistory() {
+  const { trips, book } = historyBook();
+  const name = (id) => esc(book.players[id]?.name || playerName(id));
+  const rec = (r) => `${r.w}-${r.l}-${r.h}`;
+  const where = (x) => `${esc(x.course)} · ${esc(x.trip)} ${x.year}`;
+
+  // Trophy case: every trip, newest first.
+  const trophies = trips.map((t) => {
+    const c = t.champion;
+    let main;
+    let sub;
+    if (t.final && c && !c.tied) {
+      main = `🏆 ${esc(c.label)}`;
+      sub = c.team ? `${c.players.map(name).join(', ')} · ${fmtHalf(c.points)}–${fmtHalf(c.against)}` : `${fmtHalf(c.points)} points`;
+    } else if (t.final) {
+      main = 'Tied';
+      sub = 'Decided by putt-off';
+    } else if (c && (c.points || Object.values(t.players).some((p) => p.rounds.length))) {
+      main = `Live · ${esc(c.label)} leads`;
+      sub = `${fmtHalf(c.points)} points so far`;
+    } else {
+      main = 'Up next';
+      sub = 'The trophy is up for grabs';
+    }
+    return `<div class="ht-trip ${t.final ? 'done' : ''}">
+      <div class="ht-year">${t.year}</div>
+      <div class="ht-body"><div class="ht-name">${esc(t.name)} <small>${esc(t.place)} · ${esc(t.dates)}</small></div>
+        <div class="ht-champ">${main}</div><div class="ht-sub">${sub}</div></div>
+    </div>`;
+  }).join('');
+
+  // All-time table: titles, then points.
+  const rows = Object.values(book.players).sort((a, b) => b.titles.length - a.titles.length || b.points - a.points || a.name.localeCompare(b.name));
+  const pick = ui.histPlayer && book.players[ui.histPlayer] ? ui.histPlayer : (book.players[ui.me] ? ui.me : rows[0]?.id);
+  const table = `<div class="card hist-table">
+    <div class="hist-row head"><span>Player</span><span>🏆</span><span>W-L-H</span><span>Pts</span><span>Avg</span></div>
+    ${rows.map((r) => `<button class="hist-row ${r.id === pick ? 'on' : ''}" data-action="hist-player" data-player="${r.id}">
+      <span><b>${esc(r.name)}</b><small>${r.trips} trip${r.trips === 1 ? '' : 's'}</small></span>
+      <span>${r.titles.length || '–'}</span><span>${rec(r)}</span><span>${fmtHalf(r.points)}</span>
+      <span>${r.avg ? r.avg.toFixed(1) : '–'}</span></button>`).join('')}
+  </div>`;
+
+  // The picked player's page.
+  let player = '';
+  const p = book.players[pick];
+  if (p) {
+    const opps = rows.filter((o) => o.id !== p.id).map((o) => ({ o, hh: careerH2H(book, p.id, o.id) })).filter((x) => x.hh.games.length);
+    const pals = rows.filter((o) => o.id !== p.id).map((o) => ({ o, r: book.partners[[p.id, o.id].sort().join('|')] })).filter((x) => x.r);
+    const stat = (k, v) => `<div class="hp-stat"><b>${v}</b><span>${k}</span></div>`;
+    player = `<div class="card hist-player">
+      <div class="hp-head"><div class="hp-name">${esc(p.name)}</div>
+        <div class="hp-titles">${p.titles.length ? p.titles.map((t) => `🏆 ${esc(t.trip)} ${t.year}${t.team ? ` <small>(${esc(t.team)})</small>` : ''}`).join('<br>') : 'Still chasing a title'}</div></div>
+      <div class="hp-stats">
+        ${stat('Record', rec(p))}${stat('Points', fmtHalf(p.points))}${stat('Rounds', p.played)}
+        ${stat('Avg', p.avg ? p.avg.toFixed(1) : '–')}${stat('Birdies', p.birdies)}${stat('Skins', `${p.skinsWon}${p.skinsNet ? ` · ${p.skinsNet > 0 ? '+' : '−'}$${Math.abs(p.skinsNet)}` : ''}`)}
+      </div>
+      ${p.best ? `<div class="kv"><span>Best round</span><b>${p.best.gross} <small>${where(p.best)}</small></b></div>` : ''}
+      ${p.aces.length ? `<div class="kv"><span>Hole in one</span><b>${p.aces.map((a) => `⛳ ${esc(a.course)} #${a.hole}`).join(', ')}</b></div>` : ''}
+      ${p.eagles ? `<div class="kv"><span>Eagles</span><b>${p.eagles}</b></div>` : ''}
+      ${opps.length ? `<div class="hp-sub">Head to head · singles</div>${opps.map(({ o, hh }) => `
+        <div class="kv"><span>vs ${esc(o.name)}</span><b class="${hh.w > hh.l ? 'hh-up' : hh.w < hh.l ? 'hh-down' : ''}">${hh.w}-${hh.l}-${hh.h}</b></div>`).join('')}` : ''}
+      ${pals.length ? `<div class="hp-sub">With a partner · best ball</div>${pals.map(({ o, r }) => `
+        <div class="kv"><span>with ${esc(o.name)}</span><b>${rec(r)}</b></div>`).join('')}` : ''}
+    </div>`;
+  }
+
+  // Records.
+  const R = book.records;
+  const lines = [];
+  if (R.low) lines.push(['Low round', `${R.low.gross} <small>(${fmtToPar(R.low.toPar)})</small>`, `${name(R.low.player)} · ${where(R.low)}`]);
+  if (R.birdies) lines.push(['Most birdies, one round', `${R.birdies.birdies}`, `${name(R.birdies.player)} · ${where(R.birdies)}`]);
+  if (R.win) lines.push(['Biggest win', esc(R.win.status.replace('Won ', '')), `${R.win.winners.map(name).join(' & ')} over ${R.win.losers.map(name).join(' & ')} · ${esc(R.win.course)} ${R.win.year}`]);
+  if (R.trip) lines.push(['Most points, one trip', fmtHalf(R.trip.points), `${name(R.trip.player)} · ${rec(R.trip)} · ${esc(R.trip.trip)} ${R.trip.year}`]);
+  const birdieKing = rows.slice().sort((a, b) => b.birdies - a.birdies)[0];
+  if (birdieKing?.birdies) lines.push(['Most birdies, all time', `${birdieKing.birdies}`, name(birdieKing.id)]);
+  const skinsKing = rows.slice().sort((a, b) => b.skinsNet - a.skinsNet)[0];
+  if (skinsKing?.skinsNet > 0) lines.push(['Skins money, all time', `+$${skinsKing.skinsNet}`, `${name(skinsKing.id)} · ${skinsKing.skinsWon} skins`]);
+  const aces = rows.flatMap((r) => r.aces.map((a) => ({ ...a, id: r.id })));
+  for (const a of aces) lines.push(['Hole in one', '⛳', `${name(a.id)} · ${esc(a.course)} #${a.hole} (par ${a.par}) · ${a.year}`]);
+  const records = `<div class="card hist-records">${lines.map(([k, v, d]) => `
+    <div class="hr-row"><div><div class="hr-k">${k}</div><div class="hr-d">${d}</div></div><div class="hr-v">${v}</div></div>`).join('')}</div>`;
+
+  const courses = Object.entries(book.courses).sort((a, b) => a[1].gross - b[1].gross);
+  return `
+    <section><h2>Trophy case</h2><div class="card hist-trophies">${trophies}</div></section>
+    <section><h2>All-time</h2><p class="note">Tap a player for their career, head to head and partners.</p>${table}${player}</section>
+    <section><h2>Records</h2>${records}</section>
+    ${courses.length ? `<section><h2>Course records</h2><div class="card">${courses.map(([c, r]) => `
+      <div class="kv"><span>${esc(c)}</span><b>${r.gross} <small>${name(r.player)} · ${r.year}</small></b></div>`).join('')}</div></section>` : ''}`;
+}
+
 // ---------- Setup ----------
 
 function renderSetup() {
@@ -3119,6 +3222,8 @@ const TABS = [
   ['scores', '✏️', 'Scores', renderScores],
   ['feed', '💬', 'Feed', renderFeed],
   ['trip', '🗺️', 'Trip', renderTrip],
+  // History adds the current trip's live scores to the saved ones, so it lives on the current trip.
+  ...(IS_CURRENT_TRIP ? [['history', '📜', 'History', renderHistory]] : []),
   ['setup', '⚙️', 'Setup', renderSetup],
 ];
 // Reached from the champion banner, the Trip tab or a #recap link.
@@ -3270,6 +3375,9 @@ app.addEventListener('click', async (e) => {
       break;
     case 'info':
       ui.info = ui.info === el.dataset.id ? null : el.dataset.id;
+      break;
+    case 'hist-player':
+      ui.histPlayer = el.dataset.player;
       break;
     case 'feed-filter':
       ui.feedFilter = el.dataset.id;

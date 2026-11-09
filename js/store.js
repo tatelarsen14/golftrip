@@ -20,9 +20,9 @@ export const MAX_VIDEO_MB = 200;
 // merged over the defaults by id. Setups saved before the teams-of-4 format
 // (no `v: 2`) are ignored. Pars always come from the scorecards in data.js.
 const SAVED_ROUND_FIELDS = ['id', 'enabled', 'course', 'groups'];
-function withDefaults(saved) {
-  const config = structuredClone(DEFAULT_CONFIG);
-  if (saved?.v !== DEFAULT_CONFIG.v) return config;
+export function withDefaults(saved, defaults = DEFAULT_CONFIG) {
+  const config = structuredClone(defaults);
+  if (saved?.v !== defaults.v) return config;
   config.teams = saved.teams || [];
   config.draft = {
     captains: saved.draft?.captains || [], picks: saved.draft?.picks || [], times: saved.draft?.times || [],

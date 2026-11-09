@@ -9,6 +9,8 @@ export const LOCKED = true;
 export const MODE = 'cup';
 // How it ended, for the trip list.
 export const RESULT = 'Team Tate won 16½–13½';
+// Every score and the final setup, for the History tab.
+export { SNAPSHOT } from './wa-id-2026.snapshot.js';
 // Saved before trips had their own keys, so it keeps the original ones.
 export const UI_KEY = 'golftrip:ui';
 export const SEEN_KEY = 'golftrip:seen';
