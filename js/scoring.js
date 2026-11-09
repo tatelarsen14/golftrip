@@ -39,6 +39,7 @@ export function groupRoster(group) {
 // Most points a round is worth, across both teams.
 export function roundPoints(round) {
   if (round.format === 'match') return 6;
+  if (round.format === 'nines') return 6;
   if (round.format === 'teamstroke') return TEAMSTROKE_POINTS + BIRDIE_POINTS;
   if (round.format === 'escalating') return 2 * (2 * POINTS.win + 2 * ESCALATING_BACK_POINTS);
   return 0;
@@ -104,6 +105,25 @@ export function buildMatches(config) {
         roundId: round.id, group: -1, id: `${round.id}-aces`, type: 'teamaces', label: `Hole in one · ${ACE_POINTS} pt each`,
         weight: ACE_POINTS, holes, pars: config.pars?.[round.id] || {}, sides: structuredClone(sides), strokes: {},
       });
+      continue;
+    }
+    if (round.format === 'nines') {
+      round.groups.forEach((g, gi) => (g.nines || []).forEach((nine, ni) => {
+        if (!nine?.a) return; // a seeded nine waits for the standings
+        const holes = [front, back][ni];
+        const nn = ni ? 'Back 9' : 'Front 9';
+        const base = { roundId: round.id, group: gi, nine: ni, holes };
+        matches.push({
+          ...base, id: `${round.id}-g${gi + 1}-n${ni + 1}-bb`, type: 'bestball', label: `Best Ball · ${nn}`,
+          sides: [{ team: 0, players: [...nine.a] }, { team: 1, players: [...nine.b] }],
+          strokes: matchStrokes(config, round.id, holes, [...nine.a, ...nine.b]),
+        });
+        nine.singles.forEach(({ a: x, b: y }, si) => matches.push({
+          ...base, id: `${round.id}-g${gi + 1}-n${ni + 1}-s${si + 1}`, type: 'singles', label: `Singles · ${nn}`,
+          sides: [{ team: 0, players: [x] }, { team: 1, players: [y] }],
+          strokes: matchStrokes(config, round.id, holes, [x, y]),
+        }));
+      }));
       continue;
     }
     if (round.format !== 'match' && round.format !== 'escalating') continue;
@@ -342,7 +362,8 @@ export function computeStandings(config, scores) {
       credit(teams[side.team]);
       // Quicksands points are split between the four players.
       const share = isTeamMatch(m) ? 1 / side.players.length : 1;
-      side.players.forEach((p) => credit(players[p], share));
+      // Solo trips have no teams: everyone gets their own row.
+      side.players.forEach((p) => credit(players[p] ||= { id: p, team: -1, points: 0, projected: 0, w: 0, l: 0, h: 0 }, share));
     });
     return { match: m, result: res };
   });
@@ -513,6 +534,20 @@ export function resolveConfig(config, scores) {
   const earlier = [];
   for (const round of resolved.rounds) {
     if (!round.enabled || round.format === 'stroke') continue;
+    if (round.format === 'nines') {
+      round.groups.forEach((g) => {
+        g.nines = g.nines.map((nine, ni) => {
+          if (!nine.seed) return nine;
+          const before = { ...round, groups: [{ ...g, nines: g.nines.slice(0, ni) }] };
+          const prior = buildMatches({ ...resolved, rounds: [...earlier, before] });
+          const ready = prior.length > 0 && prior.every((m) => computeMatch(m, scores[m.roundId]).done);
+          if (!ready) return { seed: true, pending: true };
+          return seedNine(soloTable(prior, scores, g.players).map((r) => r.id));
+        });
+      });
+      earlier.push(round);
+      continue;
+    }
     if (!teamsReady) {
       round.pending = true;
       round.waitingOn = 'draft';
@@ -553,6 +588,48 @@ export function resolveConfig(config, scores) {
     earlier.push(round);
   }
   return resolved;
+}
+
+// ---------- Solo trips: best ball + singles every nine ----------
+//
+// Each nine is a 2 v 2 best ball (`a` v `b`) plus two singles inside the
+// foursome (`singles`: [{ a, b }], objects since Firestore can't nest arrays). Every
+// win is a point for the player (best ball: both partners), a halve is half.
+// A nine marked `seed` is set by the standings once every earlier nine is
+// final: 1st & 4th v 2nd & 3rd in best ball, singles 1st v 2nd and 4th v 3rd.
+
+export function seedNine([p1, p2, p3, p4]) {
+  return { a: [p1, p4], b: [p2, p3], singles: [{ a: p1, b: p2 }, { a: p4, b: p3 }], seeded: true };
+}
+
+// Points table from a set of matches: points, then fewest strokes over the
+// holes those matches covered, then roster order.
+export function soloTable(matches, scores, playerIds) {
+  const rows = Object.fromEntries(playerIds.map((id, i) => [id, { id, i, points: 0, projected: 0, w: 0, l: 0, h: 0, strokes: 0, played: 0 }]));
+  const counted = new Set();
+  for (const m of matches) {
+    const res = computeMatch(m, scores[m.roundId]);
+    m.sides.forEach((side, si) => side.players.forEach((p) => {
+      const r = rows[p];
+      if (!r) return;
+      if (res.points) {
+        r.points += res.points[si];
+        if (res.leader === null) r.h++;
+        else if (res.leader === si) r.w++;
+        else r.l++;
+      }
+      if (res.projected) r.projected += res.projected[si];
+      for (const hole of m.holes) {
+        const key = `${p}|${m.roundId}|${hole}`;
+        const v = scores[m.roundId]?.[p]?.[hole];
+        if (counted.has(key) || !isScore(v)) continue;
+        counted.add(key);
+        r.strokes += v;
+        r.played++;
+      }
+    }));
+  }
+  return Object.values(rows).sort((a, b) => b.points - a.points || a.strokes - b.strokes || a.i - b.i);
 }
 
 // ---------- Friday: Captain Round and the draft ----------

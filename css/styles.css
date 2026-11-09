@@ -1046,3 +1046,7 @@ label.btn.disabled { opacity: .4; }
 .ms-big .ms-sum { background: #efece1; font-size: 13px; min-width: 32px; }
 .ms-big .ms-hole .ms-sum, .ms-big .ms-hole td { color: #fff; }
 .ms-big .mk { width: 1.5em; height: 1.5em; font-size: 13px; }
+
+/* Solo trip standings: points and record instead of score and total. */
+.ms-board.solo-pts .ms-row { grid-template-columns: 34px 1fr 54px 64px; }
+.ms-board.solo-pts .ms-thru { border-right: 0; }

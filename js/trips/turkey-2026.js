@@ -1,6 +1,9 @@
 // The Pre Turkey Classic, Nov 22-23, 2026: two rounds near St. George with
-// the four of us, everyone for themselves. The format is still to be decided;
-// until then both days are straight stroke play.
+// the four of us, everyone for themselves. Every nine is a 2 v 2 best ball
+// plus two singles in the same foursome; each win is a point for the player.
+// Partners rotate so everyone partners everyone once and plays everyone once
+// in singles over the first three nines. The last nine is seeded by the
+// standings: 1st & 4th v 2nd & 3rd, singles 1st v 2nd and 4th v 3rd.
 
 export const ID = 'turkey-2026';
 export const LOCKED = false;
@@ -25,13 +28,23 @@ export const PLAYERS = [
   { id: 'jonah', name: 'Jonah' },
 ];
 
-export const ROTATION = {};
+// Partners and singles for each nine (see the top of the file).
+const nine = (a, b, singles) => ({ a, b, singles: singles.map(([x, y]) => ({ a: x, b: y })) });
+export const ROTATION = {
+  sky: [
+    nine(['tate', 'garrett'], ['brody', 'jonah'], [['tate', 'brody'], ['garrett', 'jonah']]),
+    nine(['tate', 'brody'], ['garrett', 'jonah'], [['tate', 'jonah'], ['brody', 'garrett']]),
+  ],
+  copper: [
+    nine(['tate', 'jonah'], ['garrett', 'brody'], [['tate', 'garrett'], ['jonah', 'brody']]),
+    { seed: true },
+  ],
+};
 
 // Hole handicap (stroke index) from each scorecard: 1 = hardest hole.
 export const HOLE_HANDICAPS = {
   sky: [11, 17, 15, 3, 7, 9, 1, 13, 5, 10, 14, 12, 16, 2, 18, 8, 4, 6],
-  // Copper Rock: placeholder until we have the real scorecard.
-  copper: [1, 3, 5, 7, 9, 11, 13, 15, 17, 2, 4, 6, 8, 10, 12, 14, 16, 18],
+  copper: [14, 2, 16, 12, 8, 18, 4, 6, 10, 7, 9, 13, 1, 3, 17, 11, 15, 5],
 };
 
 // Everyone even to start (Tate can change it in Setup).
@@ -48,18 +61,17 @@ export const DEFAULT_CONFIG = {
   holeHcp: HOLE_HANDICAPS,
   rounds: [
     {
-      id: 'sky', tees: ['12:40 PM'], date: '2026-11-22', day: 'Sun Nov 22', course: 'Sky Mountain', enabled: true, format: 'stroke', skins: 'par3', birdies: true,
-      groups: [{ players: ['tate', 'garrett', 'brody', 'jonah'] }],
+      id: 'sky', tees: ['12:40 PM'], date: '2026-11-22', day: 'Sun Nov 22', course: 'Sky Mountain', enabled: true, format: 'nines', skins: 'par3',
+      groups: [{ players: ['tate', 'garrett', 'brody', 'jonah'], nines: ROTATION.sky }],
     },
     {
-      id: 'copper', tees: ['11:12 AM'], date: '2026-11-23', day: 'Mon Nov 23', course: 'Copper Rock', enabled: true, format: 'stroke', skins: 'par3', birdies: true,
-      groups: [{ players: ['tate', 'garrett', 'brody', 'jonah'] }],
+      id: 'copper', tees: ['11:12 AM'], date: '2026-11-23', day: 'Mon Nov 23', course: 'Copper Rock', enabled: true, format: 'nines', skins: 'par3',
+      groups: [{ players: ['tate', 'garrett', 'brody', 'jonah'], nines: ROTATION.copper }],
     },
   ],
   pars: {
     sky: parsFrom([4, 3, 4, 4, 4, 5, 4, 3, 5, 5, 4, 3, 4, 4, 4, 3, 4, 5]), // Sky Mountain, 72
-    // Copper Rock is a par 72 (hole 1 is a par 5); placeholder pars until we have the card.
-    copper: parsFrom([5, 4, 4, 3, 4, 4, 5, 3, 4, 4, 4, 3, 5, 4, 4, 3, 4, 5]),
+    copper: parsFrom([5, 4, 4, 3, 5, 4, 3, 4, 4, 4, 4, 5, 4, 4, 3, 5, 3, 4]), // Copper Rock (black), 72
   },
 };
 
@@ -71,14 +83,14 @@ export const ITINERARY = [
   {
     day: 'Sunday', date: 'Nov 22', title: 'Sky Mountain Golf Course',
     items: [
-      { icon: '⛳', time: '12:40 PM', text: 'Tee time — Sky Mountain', sub: '$78' },
+      { icon: '⛳', time: '12:40 PM', text: 'Tee time — Sky Mountain', sub: '$78 · Front: Tate & Garrett v Brody & Jonah · Back: Tate & Brody v Garrett & Jonah' },
     ],
     stay: { name: "Aunt's house" },
   },
   {
     day: 'Monday', date: 'Nov 23', title: 'Copper Rock Golf Course',
     items: [
-      { icon: '⛳', time: '11:12 AM', text: 'Tee time — Copper Rock', sub: 'Free!' },
+      { icon: '⛳', time: '11:12 AM', text: 'Tee time — Copper Rock', sub: 'Free! · Front: Tate & Jonah v Garrett & Brody · Back: seeded by the standings' },
     ],
   },
 ];
