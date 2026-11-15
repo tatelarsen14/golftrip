@@ -36,7 +36,7 @@ const pairKey = (x, y) => [x, y].sort().join('|');
 
 test('Pre Turkey Classic: first three nines, everyone partners everyone once and plays everyone once in singles', () => {
   const ms = buildMatches(resolveConfig(turkey.DEFAULT_CONFIG, {}));
-  assert.equal(ms.length, 9); // last nine waits for the standings
+  assert.equal(ms.length, 10); // 3 a nine, plus the final stroke play nine
   const partners = ms.filter((m) => m.type === 'bestball').flatMap((m) => m.sides.map((s) => pairKey(...s.players)));
   const singles = ms.filter((m) => m.type === 'singles').map((m) => pairKey(m.sides[0].players[0], m.sides[1].players[0]));
   assert.equal(new Set(partners).size, 6);
@@ -49,36 +49,30 @@ function card(roundId, tweaks = {}) {
   return Object.fromEntries(Object.entries(pars).map(([h, p]) => [h, p + (tweaks[h] || 0)]));
 }
 
-test('Pre Turkey Classic: the last nine is championship singles, 1st v 2nd and 3rd v 4th for 2 points', () => {
-  // Tate birdies every hole he plays; Garrett bogeys every hole; Brody makes
-  // one birdie on each nine; Jonah pars.
-  const all = (d) => Object.fromEntries(Array.from({ length: 18 }, (_, i) => [i + 1, d]));
-  const mk = (rid) => ({
-    tate: card(rid, all(-1)), garrett: card(rid, all(1)), brody: card(rid, { 1: -1, 10: -1 }), jonah: card(rid),
-  });
-  const half = (sc) => Object.fromEntries(Object.entries(sc).map(([p, h]) => [p, Object.fromEntries(Object.entries(h).filter(([k]) => k <= 9))]));
-  let scores = { sky: mk('sky'), copper: half(mk('copper')) };
+test('Pre Turkey Classic: the last nine is all four stroke play, 3-2-1-0 with ties split', () => {
+  const ids = turkey.PLAYERS.map((p) => p.id);
+  // Front 9s and Sunday: everyone pars, so every match is halved.
+  const scores = { sky: Object.fromEntries(ids.map((p) => [p, card('sky')])), copper: {} };
+  // Copper Rock back 9: Tate -2, Garrett -1, Brody and Jonah even (tied for 3rd).
+  const back = { tate: { 10: -1, 12: -1 }, garrett: { 13: -1 }, brody: {}, jonah: {} };
+  for (const p of ids) scores.copper[p] = card('copper', back[p]);
   const r = resolveConfig(turkey.DEFAULT_CONFIG, scores);
-  const last = r.rounds.find((x) => x.id === 'copper').groups[0].nines[1];
-  assert.ok(last.seeded);
-  const table = soloTable(buildMatches(r).filter((m) => !(m.roundId === 'copper' && m.nine === 1)), scores, turkey.PLAYERS.map((p) => p.id));
-  const [p1, p2, p3, p4] = table.map((x) => x.id);
-  assert.equal(p1, 'tate');
-  assert.equal(p4, 'garrett');
-  assert.equal(last.a, undefined); // no best ball
-  assert.deepEqual(last.singles, [{ a: p1, b: p2 }, { a: p3, b: p4 }]);
-  // Both final-nine matches are 2-point singles; Tate wins his for 8 in all.
   const fin = buildMatches(r).filter((m) => m.roundId === 'copper' && m.nine === 1);
-  assert.equal(fin.length, 2);
-  assert.ok(fin.every((m) => m.type === 'singles' && m.weight === 2));
-  const full = { sky: mk('sky'), copper: mk('copper') };
-  const done = soloTable(buildMatches(resolveConfig(turkey.DEFAULT_CONFIG, full)), full, turkey.PLAYERS.map((p) => p.id));
-  assert.equal(done[0].id, 'tate');
-  assert.equal(done[0].points, 8);
-  // Before the front 9 at Copper Rock is in, it's still waiting.
-  scores = { sky: mk('sky') };
-  assert.ok(resolveConfig(turkey.DEFAULT_CONFIG, scores).rounds[1].groups[0].nines[1].pending);
-  // Tate wins all 6 of his matches through three nines: 6 points.
-  assert.equal(table[0].points, 6);
-  assert.equal(computeStandings(r, { sky: mk('sky'), copper: half(mk('copper')) }).players.tate.points, 6);
+  assert.equal(fin.length, 1);
+  assert.equal(fin[0].type, 'ninestroke');
+  const t = Object.fromEntries(soloTable(buildMatches(r), scores, ids).map((x) => [x.id, x]));
+  // Two halved matches a nine (1 point) for three nines before the final one.
+  assert.equal(t.tate.points, 3 + 3);
+  assert.equal(t.garrett.points, 3 + 2);
+  assert.equal(t.brody.points, 3 + 0.5);
+  assert.equal(t.jonah.points, 3 + 0.5);
+  // The stroke nine isn't a win or a loss.
+  assert.equal(t.tate.w + t.tate.l, 0);
+  assert.equal(computeStandings(r, scores).players.tate.points, 6);
+  // Halfway through the nine it's live, not final.
+  const part = structuredClone(scores);
+  for (const p of ids) for (let h = 15; h <= 18; h++) delete part.copper[p][h];
+  const live = buildMatches(resolveConfig(turkey.DEFAULT_CONFIG, part)).find((m) => m.type === 'ninestroke');
+  const pt = soloTable([live], part, ids);
+  assert.equal(pt.reduce((a, x) => a + x.points, 0), 0);
 });

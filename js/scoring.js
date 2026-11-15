@@ -109,10 +109,21 @@ export function buildMatches(config) {
     }
     if (round.format === 'nines') {
       round.groups.forEach((g, gi) => (g.nines || []).forEach((nine, ni) => {
-        if (!nine?.singles) return; // a seeded nine waits for the standings
         const holes = [front, back][ni];
         const nn = ni ? 'Back 9' : 'Front 9';
         const base = { roundId: round.id, group: gi, nine: ni, holes };
+        if (nine?.stroke) {
+          // The whole foursome in one stroke play nine, points by finish.
+          const players = [...g.players];
+          matches.push({
+            ...base, id: `${round.id}-g${gi + 1}-n${ni + 1}-stroke`, type: 'ninestroke',
+            label: `Stroke play · ${nn} · ${nine.places.join('-')}`, places: [...nine.places],
+            sides: players.map((p) => ({ team: -1, players: [p] })),
+            strokes: matchStrokes(config, round.id, holes, players),
+          });
+          return;
+        }
+        if (!nine?.singles) return;
         const w = nine.weight || 1;
         if (nine.a) matches.push({
           ...base, id: `${round.id}-g${gi + 1}-n${ni + 1}-bb`, type: 'bestball', label: `Best Ball · ${nn}`,
@@ -283,6 +294,7 @@ export function computeMatch(match, roundScores) {
   if (match.type === 'teamstroke') return computeTeamStroke(match, roundScores);
   if (match.type === 'teambirdies') return computeTeamBirdies(match, roundScores);
   if (match.type === 'teamaces') return computeTeamAces(match, roundScores);
+  if (match.type === 'ninestroke') return computeNineStroke(match, roundScores);
   const total = match.holes.length;
   let diff = 0;
   let played = 0;
@@ -351,7 +363,7 @@ export function computeStandings(config, scores) {
     m.sides.forEach((side, si) => {
       const credit = (row, share = 1) => {
         if (!row) return;
-        if (res.points && m.type === 'teamaces') {
+        if (res.points && (m.type === 'teamaces' || m.type === 'ninestroke')) {
           row.points += res.points[si] * share; // bonus only: not a win, loss or halve
         } else if (res.points) {
           row.points += res.points[si] * share;
@@ -536,17 +548,7 @@ export function resolveConfig(config, scores) {
   const earlier = [];
   for (const round of resolved.rounds) {
     if (!round.enabled || round.format === 'stroke') continue;
-    if (round.format === 'nines') {
-      round.groups.forEach((g) => {
-        g.nines = g.nines.map((nine, ni) => {
-          if (!nine.seed) return nine;
-          const before = { ...round, groups: [{ ...g, nines: g.nines.slice(0, ni) }] };
-          const prior = buildMatches({ ...resolved, rounds: [...earlier, before] });
-          const ready = prior.length > 0 && prior.every((m) => computeMatch(m, scores[m.roundId]).done);
-          if (!ready) return { seed: true, pending: true };
-          return seedNine(soloTable(prior, scores, g.players).map((r) => r.id));
-        });
-      });
+    if (round.format === 'nines') { // fixed matchups: nothing to fill in
       earlier.push(round);
       continue;
     }
@@ -597,13 +599,34 @@ export function resolveConfig(config, scores) {
 // Each nine is a 2 v 2 best ball (`a` v `b`) plus two singles inside the
 // foursome (`singles`: [{ a, b }], objects since Firestore can't nest arrays). Every
 // win is a point for the player (best ball: both partners), a halve is half.
-// A nine marked `seed` is the championship nine, set by the standings once
-// every earlier nine is final: singles only, 1st v 2nd and 3rd v 4th, worth
-// 2 points each (a halve is 1 each).
-export const FINAL_NINE_POINTS = 2;
+// A nine marked `stroke` is all four in one stroke play nine (net, if anyone
+// gets strokes), with `places` points for 1st, 2nd, 3rd and 4th. Ties split
+// the points for the places they cover (tied for 1st with 3-2-1-0: 2½ each).
 
-export function seedNine([p1, p2, p3, p4]) {
-  return { singles: [{ a: p1, b: p2 }, { a: p3, b: p4 }], weight: FINAL_NINE_POINTS, seeded: true };
+// Low total wins. Live, it ranks on the holes everyone has a score on, and
+// `projected` is the points if it ended right now; `points` once it's done.
+function computeNineStroke(match, roundScores) {
+  const all = match.holes.filter((h) => match.sides.every((s) => isScore(roundScores?.[s.players[0]]?.[h])));
+  const totals = match.sides.map((s) => all.reduce((a, h) => a + netScore(match, s.players[0], h, roundScores[s.players[0]][h]), 0));
+  const order = totals.map((t, i) => i).sort((a, b) => totals[a] - totals[b]);
+  const share = Array(totals.length).fill(0);
+  const place = Array(totals.length).fill(0);
+  for (let i = 0; i < order.length;) {
+    let j = i;
+    while (j + 1 < order.length && totals[order[j + 1]] === totals[order[i]]) j++;
+    const pts = match.places.slice(i, j + 1).reduce((a, b) => a + (b || 0), 0) / (j - i + 1);
+    for (let k = i; k <= j; k++) { share[order[k]] = pts; place[order[k]] = i + 1; }
+    i = j + 1;
+  }
+  const played = all.length;
+  const done = played === match.holes.length;
+  const projected = played ? share : null;
+  const lead = played && place.filter((p) => p === 1).length === 1 ? place.indexOf(1) : null;
+  const status = !played ? 'Not started' : done ? 'Final' : `Thru ${played}`;
+  return {
+    played, remaining: match.holes.length - played, done, leader: lead, up: 0, status,
+    points: done ? share : null, projected, totals, place, holes: [],
+  };
 }
 
 // Points table from a set of matches: points, then fewest strokes over the
@@ -616,7 +639,9 @@ export function soloTable(matches, scores, playerIds) {
     m.sides.forEach((side, si) => side.players.forEach((p) => {
       const r = rows[p];
       if (!r) return;
-      if (res.points) {
+      if (res.points && m.type === 'ninestroke') {
+        r.points += res.points[si];
+      } else if (res.points) {
         r.points += res.points[si];
         if (res.leader === null) r.h++;
         else if (res.leader === si) r.w++;

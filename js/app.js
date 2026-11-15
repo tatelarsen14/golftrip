@@ -9,7 +9,7 @@ import {
   TIEBREAKERS, puttoffKey, holesOf, halvesOf, groupRoster, roundPoints, ESCALATING_BACK_POINTS, TEAMSTROKE_POINTS,
   BIRDIE_POINTS, ACE_POINTS, bonusPoints, STROKES_PER_NINE, TEAMSTROKE_STROKES, HCP_BUCKETS, isTeamMatch, netScore,
   matchStreak, birdieStreak, highlights, longestBirdieRun, longestMatchRun, roundTotals,
-  captainRound, draftState, computeSkins, settleUp, tueDraftState, hardestHoles, isScore, soloTable, FINAL_NINE_POINTS,
+  captainRound, draftState, computeSkins, settleUp, tueDraftState, hardestHoles, isScore, soloTable,
 } from './scoring.js';
 import { SCOUTING, HIGHLIGHTS, DRAFT_THEME } from './draftkit.js';
 
@@ -20,7 +20,7 @@ const ORGANIZER = 'tate';
 const PLAYER_IDS = PLAYERS.map((p) => p.id);
 const SKIN_STAKE = 5;
 // Shown at the bottom of the Trip tab, to check a phone has the latest version.
-const APP_VERSION = 'Nov 9 · 3';
+const APP_VERSION = 'Nov 15 · Final 9';
 const app = document.getElementById('app');
 
 let store;
@@ -419,6 +419,7 @@ function aceCard(config, match, res) {
 // strip above shows who won each hole.
 function broadcastCard(config, match, res) {
   if (isTeamMatch(match)) return strokeCard(config, match, res);
+  if (match.type === 'ninestroke') return nineStrokeCard(config, match, res);
   const color = (si) => teamColor(match.sides[si].team);
   const kind = matchKind(match);
   const streak = !res.done ? matchStreak(res) : null;
@@ -557,7 +558,8 @@ function todayMatchCard(config, standings, round, me) {
   }
   const lines = mine.map(({ match, result }) => {
     const si = match.sides.findIndex((sd) => sd.players.includes(me));
-    const outcome = result.leader === null ? 'Halved' : result.leader === si ? result.status : `Lost ${result.status.replace('Won ', '')}`;
+    const outcome = match.type === 'ninestroke' ? `${result.place[si] ? ordinal(result.place[si]) : ''} · ${fmtHalf(result.points?.[si] || 0)} pts`
+      : result.leader === null ? 'Halved' : result.leader === si ? result.status : `Lost ${result.status.replace('Won ', '')}`;
     return `<div class="kv"><span>${esc(matchKind(match))}</span><b>${esc(outcome)}</b></div>`;
   }).join('');
   const pts = mine.reduce((a, { match, result }) => a + (result.points?.[match.sides.findIndex((sd) => sd.players.includes(me))] || 0), 0);
@@ -888,6 +890,31 @@ function soloBoard(config, rounds, gridRound) {
 
 // The Leaderboard for a solo trip: the overall leaders, each day's board,
 // skins and birdies.
+// The all-four stroke play nine: each player's total (net, if anyone gets
+// strokes) and the points their place is worth, live.
+function nineStrokeCard(config, match, res) {
+  const pars = config.pars?.[match.roundId] || {};
+  const rows = match.sides.map((s, i) => ({ id: s.players[0], i })).sort((a, b) => (res.played ? res.place[a.i] - res.place[b.i] : 0));
+  const net = Object.keys(match.strokes || {}).length > 0;
+  const holesIn = (id) => match.holes.filter((h) => isScore(store.scores[match.roundId]?.[id]?.[h]));
+  return `<article class="bc-match ns-card">
+    <div class="bc-kind"><span>${esc(match.label)}${net ? ' · net' : ''}</span><span>${res.done ? 'Final' : res.played ? `Thru ${res.played}` : ''}</span></div>
+    ${rows.map(({ id, i }) => {
+      const mine = holesIn(id);
+      const toPar = mine.reduce((a, h) => a + netScore(match, id, h, store.scores[match.roundId][id][h]) - (pars[h] || 0), 0);
+      const pts = res.points?.[i] ?? res.projected?.[i];
+      const tied = res.played && res.place.filter((p) => p === res.place[i]).length > 1;
+      return `<div class="ns-row ${res.played && res.place[i] === 1 ? 'lead' : ''}">
+        <span class="ns-pos">${res.played ? `${tied ? 'T' : ''}${res.place[i]}` : ''}</span>
+        <span class="ns-name">${esc(playerName(id))}${match.strokes?.[id] ? ' <small>●</small>' : ''}</span>
+        <span class="ns-par">${mine.length ? fmtToPar(toPar) : '–'}<small>${mine.length && mine.length < match.holes.length ? ` thru ${mine.length}` : ''}</small></span>
+        <span class="ns-pts">${pts != null ? `${fmtHalf(pts)} pt${pts === 1 ? '' : 's'}` : ''}</span>
+      </div>`;
+    }).join('')}
+    <div class="ns-foot">${match.places.map((p, k) => `${ordinal(k + 1)} ${p}`).join(' · ')}${res.done ? '' : ' · live points if it ended now'}</div>
+  </article>`;
+}
+
 // Points table for a solo trip: points, then fewest strokes.
 function soloPoints(config, scores) {
   return soloTable(buildMatches(config), scores, PLAYER_IDS);
@@ -895,7 +922,8 @@ function soloPoints(config, scores) {
 
 // One player's matches on a nine, for the countdown: who they're with and who they play.
 function nineLine(nine, me, label) {
-  if (!nine?.singles) return `${label}: championship singles, seeded by the standings`;
+  if (nine?.stroke) return `${label}: all four stroke play, ${nine.places.join('-')} points`;
+  if (!nine?.singles) return label;
   if (!nine.a) {
     const s = nine.singles.find((x) => x.a === me || x.b === me);
     return `${label}: championship singles${s ? ` v ${esc(playerName(s.a === me ? s.b : s.a))}` : ''} · ${nine.weight} pts`;
@@ -923,7 +951,7 @@ function renderSoloBoard() {
     b.birdies - a.birdies || playerName(a.id).localeCompare(playerName(b.id))));
   const started = table.some((r) => r.played);
   // Most a player can win: 2 a nine (best ball + singles), or the championship nine's singles.
-  const total = rounds.reduce((a, r) => a + r.groups[0].nines.reduce((x, n) => x + (n.seed || n.seeded ? FINAL_NINE_POINTS : 2), 0), 0);
+  const total = rounds.reduce((a, r) => a + r.groups[0].nines.reduce((x, n) => x + (n.stroke ? n.places[0] : 2), 0), 0);
   const rows = table.map((r, i) => {
     const same = (x) => x.points === r.points && x.strokes === r.strokes;
     const rank = table.findIndex(same) + 1;
@@ -953,9 +981,7 @@ function renderSoloBoard() {
         ${ms.some((m) => m.result.played > 0 && !m.result.done) ? '<span class="bc-live">LIVE</span>' : ''}</div>
       ${round.groups.map((g, gi) => (g.nines || []).map((n, ni) => `
         <div class="bc-session"><span>${roundDay(round)} · ${esc(round.course)}</span><span>${ni ? 'Back' : 'Front'} 9</span></div>
-        ${n.singles ? ms.filter((m) => m.match.group === gi && m.match.nine === ni).map((m) => broadcastCard(config, m.match, m.result)).join('')
-          : `<div class="card tbd"><div class="tbd-title">Championship singles</div>
-            <p>Set once the first three nines are final: 1st v 2nd and 3rd v 4th, ${FINAL_NINE_POINTS} points a match.</p></div>`}`).join('')).join('')}
+        ${ms.filter((m) => m.match.group === gi && m.match.nine === ni).map((m) => broadcastCard(config, m.match, m.result)).join('')}`).join('')).join('')}
     </div>`;
   }
 
@@ -980,7 +1006,7 @@ function renderSoloBoard() {
         <ul>
           <li><b>Points:</b> win a match = 1 point, halve = ½. Best ball points go to both partners, so you can win up to 2 a nine.</li>
           <li><b>First three nines:</b> partners rotate so you play with everyone once and against everyone once in singles.</li>
-          <li><b>Championship nine (Copper Rock back):</b> singles only, seeded by the standings: 1st v 2nd and 3rd v 4th, worth ${FINAL_NINE_POINTS} points (halve = 1 each). ${total} points max in all.</li>
+          <li><b>Final nine (Copper Rock back):</b> all four play it as stroke play. 3 points for 1st, 2 for 2nd, 1 for 3rd, none for 4th. Tied: split the points for those places (tied for 1st = 2½ each). ${total} points max in all.</li>
           <li><b>Winner:</b> most points. Tied: fewest total strokes, then a putt-off.</li>
           <li><b>Skins:</b> par 3s, $${SKIN_STAKE} a player.</li>
         </ul>
@@ -1709,6 +1735,7 @@ function renderCards() {
       <h3>${groupTitle(round, gi)} · ${groupLabel(config, g)}</h3>
       ${matches.filter((m) => m.group === gi).map((m) => {
         const res = computeMatch(m, roundScores);
+        if (m.type === 'ninestroke') return `<div class="bc-wrap">${nineStrokeCard(config, m, res)}</div>`;
         return `<div class="card sc-card">${matchCard(m, res, { compact: true })}${scorecard(m, res, roundScores, pars)}</div>`;
       }).join('')}`).join('')}
     <div class="legend"><span><span class="mk counted-swatch">4</span> Counted for best ball</span><span>${strokeDot} Handicap stroke</span><span>Max score: triple bogey</span></div>`;
@@ -1934,7 +1961,7 @@ function renderSetup() {
         detail = `<div class="singles-line">Team stroke play (net), ${TEAMSTROKE_POINTS} pts, plus ${BIRDIE_POINTS} for most birdies. Groups are Gamble Sands' groups.</div>`;
       } else if (r.format === 'nines') {
         detail = resolved.groups.map((g) => g.nines.map((n, ni) => `<div class="singles-line">${ni ? 'Back' : 'Front'} 9: ${!n.singles
-          ? `championship singles, seeded by the standings (1st v 2nd, 3rd v 4th, ${FINAL_NINE_POINTS} pts)`
+          ? (n.stroke ? `all four stroke play, <b>${n.places.join('-')}</b> points for 1st to 4th (ties split)` : '')
           : `${n.a ? `best ball <b>${n.a.map(name).join(' & ')}</b> v <b>${n.b.map(name).join(' & ')}</b> · ` : ''}${n.weight > 1 ? `championship singles (${n.weight} pts)` : 'singles'} <b>${n.singles.map((s) => `${name(s.a)} v ${name(s.b)}`).join(', ')}</b>`}</div>`).join('')).join('');
       } else if (r.format === 'stroke') {
         detail = SOLO ? `<div class="singles-line">Stroke play for now: every stroke counts${r.skins ? ', skins on par 3s' : ''}.</div>`
@@ -3160,6 +3187,14 @@ function matchBanner(m, res) {
   const round = view.rounds.find((r) => r.id === m.roundId);
   const kind = `${round ? roundDay(round) : ''} · ${isTeamMatch(m) ? esc(round?.course || '') : esc(matchKind(m).split(' · ')[0])}`;
   const names = (si) => esc(sideLabel(m.sides[si]));
+  if (m.type === 'ninestroke') {
+    const first = m.sides.map((s, i) => i).filter((i) => res.place[i] === 1).map((i) => esc(playerName(m.sides[i].players[0])));
+    return {
+      color: '#b8860b', kicker: `${kind} · Stroke play`, title: first.length > 1 ? `${first.join(' & ')} tie` : `${first[0]} wins the nine`,
+      score: `${Math.min(...res.totals)}`, sub: m.sides.map((s, i) => ({ s, i })).sort((x, y) => res.place[x.i] - res.place[y.i])
+        .map(({ s, i }) => `${esc(playerName(s.players[0]))} ${res.totals[i]} (${fmtHalf(res.points[i])})`).join(' · '),
+    };
+  }
   if (m.type === 'teambirdies') {
     if (res.leader === null) return { color: '#6b7568', kicker: `${kind} · Birdie point`, title: 'Split', score: '½ – ½', sub: `${res.sides[0].birdies} birdies each` };
     return {

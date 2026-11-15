@@ -2,8 +2,8 @@
 // the four of us, everyone for themselves. Every nine is a 2 v 2 best ball
 // plus two singles in the same foursome; each win is a point for the player.
 // Partners rotate so everyone partners everyone once and plays everyone once
-// in singles over the first three nines. The last nine is the championship
-// nine: singles only, seeded 1st v 2nd and 3rd v 4th, worth 2 points each.
+// in singles over the first three nines. The last nine is all four in one
+// stroke play nine: 3 points for 1st, 2 for 2nd, 1 for 3rd (ties split).
 
 export const ID = 'turkey-2026';
 export const LOCKED = false;
@@ -39,7 +39,7 @@ export const ROTATION = {
   ],
   copper: [
     nine(['tate', 'jonah'], ['garrett', 'brody'], [['tate', 'garrett'], ['jonah', 'brody']]),
-    { seed: true },
+    { stroke: true, places: [3, 2, 1, 0] },
   ],
 };
 
@@ -92,7 +92,7 @@ export const ITINERARY = [
   {
     day: 'Monday', date: 'Nov 23', title: 'Copper Rock Golf Course',
     items: [
-      { icon: '⛳', time: '11:12 AM', text: 'Tee time — Copper Rock', sub: 'Free! · Front: Tate & Jonah v Garrett & Brody · Back: championship singles, 1st v 2nd & 3rd v 4th, 2 pts' },
+      { icon: '⛳', time: '11:12 AM', text: 'Tee time — Copper Rock', sub: 'Free! · Front: Tate & Jonah v Garrett & Brody · Back: all four stroke play, 3-2-1-0 points' },
     ],
   },
 ];

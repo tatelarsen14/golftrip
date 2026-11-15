@@ -1095,3 +1095,16 @@ label.btn.disabled { opacity: .4; }
 /* A "to be set" note inside the dark scoreboard keeps dark, readable text. */
 .bc-wrap .tbd { color: #1d241f; }
 .bc-wrap .tbd p { font-size: 14px; line-height: 1.4; color: #3a443c; }
+
+/* The all-four stroke play nine: a mini leaderboard inside the dark scoreboard. */
+.ns-card { padding-bottom: 8px; }
+.ns-row { display: grid; grid-template-columns: 30px 1fr 74px 56px; align-items: center; gap: 6px; padding: 8px 10px;
+  border-top: 1px solid var(--bc-line); font-size: 15px; }
+.ns-row.lead { background: rgba(217, 173, 74, .14); box-shadow: inset 3px 0 0 #d9ad4a; }
+.ns-pos { font: 700 15px Oswald, sans-serif; color: #d9ad4a; }
+.ns-name { font: 700 17px Oswald, sans-serif; text-transform: uppercase; letter-spacing: .03em; }
+.ns-name small { color: #d9ad4a; font-size: 10px; vertical-align: 2px; }
+.ns-par { font: 700 17px Oswald, sans-serif; text-align: right; }
+.ns-par small { display: block; font: 600 10px Inter, sans-serif; color: var(--bc-dim); }
+.ns-pts { font: 700 13px Inter, sans-serif; text-align: right; color: #f4efe3; }
+.ns-foot { padding: 8px 10px 0; font-size: 12px; color: var(--bc-dim); }
