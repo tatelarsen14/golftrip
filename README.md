@@ -102,7 +102,7 @@ with `?trip=<id>` (the Trip tab lists them all under "All trips").
   everyone once and plays everyone once in singles. The last nine (Copper Rock
   back) is all four in one stroke play nine: 3 points for 1st, 2 for 2nd, 1 for
   3rd, none for 4th, ties split (9 max in all). Most points wins; ties go to
-  fewest strokes, then a putt-off. Skins on par 3s, the birdie board and a total strokes board too.
+  fewest strokes, then a putt-off. Skins on every hole ($5), the birdie board and a total strokes board too.
 - **Buckle Up** (`wa-id-2026`): the WA / ID trip, `MODE: 'cup'`, locked.
 
 To add a trip: copy a trip file, give it a new `ID`, and put it first in

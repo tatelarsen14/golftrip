@@ -20,7 +20,7 @@ const ORGANIZER = 'tate';
 const PLAYER_IDS = PLAYERS.map((p) => p.id);
 const SKIN_STAKE = 5;
 // Shown at the bottom of the Trip tab, to check a phone has the latest version.
-const APP_VERSION = 'Nov 15 · Final 9';
+const APP_VERSION = 'Nov 17 · Skins';
 const app = document.getElementById('app');
 
 let store;
@@ -915,6 +915,9 @@ function nineStrokeCard(config, match, res) {
   </article>`;
 }
 
+// How the trip's skins work, for the Format panels.
+const skinsWhere = (rounds) => (rounds.some((r) => r.skins === 'all') ? 'every hole' : 'par 3s');
+
 // Points table for a solo trip: points, then fewest strokes.
 function soloPoints(config, scores) {
   return soloTable(buildMatches(config), scores, PLAYER_IDS);
@@ -1008,7 +1011,7 @@ function renderSoloBoard() {
           <li><b>First three nines:</b> partners rotate so you play with everyone once and against everyone once in singles.</li>
           <li><b>Final nine (Copper Rock back):</b> all four play it as stroke play. 3 points for 1st, 2 for 2nd, 1 for 3rd, none for 4th. Tied: split the points for those places (tied for 1st = 2½ each). ${total} points max in all.</li>
           <li><b>Winner:</b> most points. Tied: fewest total strokes, then a putt-off.</li>
-          <li><b>Skins:</b> par 3s, $${SKIN_STAKE} a player.</li>
+          <li><b>Skins:</b> ${skinsWhere(rounds)}, $${SKIN_STAKE} a player. Win a hole outright and everyone else pays you; a tie means no skin.</li>
         </ul>
       </div>` : ''}
     </section>
@@ -1057,7 +1060,7 @@ function renderStrokeOnlyBoard() {
       ${ui.info === 'format' ? `<div class="info-panel">
         <p><b>Everyone for themselves.</b> The match format is still being decided. For now each round is straight stroke play
           and the board adds up every stroke: lowest total over ${rounds.map((r) => esc(r.course)).join(' and ')} wins.</p>
-        <p><b>Skins:</b> par 3s, $${SKIN_STAKE} a player.</p>
+        <p><b>Skins:</b> ${skinsWhere(rounds)}, $${SKIN_STAKE} a player.</p>
       </div>` : ''}
     </section>
     <section>
@@ -1964,7 +1967,7 @@ function renderSetup() {
           ? (n.stroke ? `all four stroke play, <b>${n.places.join('-')}</b> points for 1st to 4th (ties split)` : '')
           : `${n.a ? `best ball <b>${n.a.map(name).join(' & ')}</b> v <b>${n.b.map(name).join(' & ')}</b> · ` : ''}${n.weight > 1 ? `championship singles (${n.weight} pts)` : 'singles'} <b>${n.singles.map((s) => `${name(s.a)} v ${name(s.b)}`).join(', ')}</b>`}</div>`).join('')).join('');
       } else if (r.format === 'stroke') {
-        detail = SOLO ? `<div class="singles-line">Stroke play for now: every stroke counts${r.skins ? ', skins on par 3s' : ''}.</div>`
+        detail = SOLO ? `<div class="singles-line">Stroke play for now: every stroke counts${r.skins ? `, skins on ${r.skins === 'all' ? 'every hole' : 'par 3s'}` : ''}.</div>`
           : '<div class="singles-line">Captain Round: no points, no skins.</div>';
       }
       return `<div class="card setup-round ${r.enabled ? '' : 'off'}">

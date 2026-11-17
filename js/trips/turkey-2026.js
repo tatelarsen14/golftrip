@@ -63,11 +63,11 @@ export const DEFAULT_CONFIG = {
   holeHcp: HOLE_HANDICAPS,
   rounds: [
     {
-      id: 'sky', tees: ['12:40 PM'], date: '2026-11-22', day: 'Sun Nov 22', course: 'Sky Mountain', enabled: true, format: 'nines', skins: 'par3',
+      id: 'sky', tees: ['12:40 PM'], date: '2026-11-22', day: 'Sun Nov 22', course: 'Sky Mountain', enabled: true, format: 'nines', skins: 'all',
       groups: [{ players: ['tate', 'garrett', 'brody', 'jonah'], nines: ROTATION.sky }],
     },
     {
-      id: 'copper', tees: ['11:12 AM'], date: '2026-11-23', day: 'Mon Nov 23', course: 'Copper Rock', enabled: true, format: 'nines', skins: 'par3',
+      id: 'copper', tees: ['11:12 AM'], date: '2026-11-23', day: 'Mon Nov 23', course: 'Copper Rock', enabled: true, format: 'nines', skins: 'all',
       groups: [{ players: ['tate', 'garrett', 'brody', 'jonah'], nines: ROTATION.copper }],
     },
   ],
