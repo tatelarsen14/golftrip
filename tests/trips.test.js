@@ -25,9 +25,9 @@ test('trips: every round has pars and hole handicaps for each hole, on a real pl
   }
 });
 
-test('Pre Turkey Classic: both courses are par 72', () => {
+test('Pre Turkey Classic: every course is par 72', () => {
   const t = TRIPS.find((x) => x.ID === 'turkey-2026');
-  for (const id of ['sky', 'copper']) assert.equal(Object.values(t.DEFAULT_CONFIG.pars[id]).reduce((a, b) => a + b, 0), 72);
+  for (const id of ['coral', 'sky', 'copper']) assert.equal(Object.values(t.DEFAULT_CONFIG.pars[id]).reduce((a, b) => a + b, 0), 72);
 });
 
 import { buildMatches, resolveConfig, computeStandings, soloTable } from '../js/scoring.js';
@@ -36,9 +36,10 @@ const pairKey = (x, y) => [x, y].sort().join('|');
 
 test('Pre Turkey Classic: first three nines, everyone partners everyone once and plays everyone once in singles', () => {
   const ms = buildMatches(resolveConfig(turkey.DEFAULT_CONFIG, {}));
-  assert.equal(ms.length, 10); // 3 a nine, plus the final stroke play nine
-  const partners = ms.filter((m) => m.type === 'bestball').flatMap((m) => m.sides.map((s) => pairKey(...s.players)));
-  const singles = ms.filter((m) => m.type === 'singles').map((m) => pairKey(m.sides[0].players[0], m.sides[1].players[0]));
+  assert.equal(ms.length, 11); // Saturday's stroke play, 3 a nine, plus the final stroke play nine
+  const nines = ms.filter((m) => m.roundId !== 'coral');
+  const partners = nines.filter((m) => m.type === 'bestball').flatMap((m) => m.sides.map((s) => pairKey(...s.players)));
+  const singles = nines.filter((m) => m.type === 'singles').map((m) => pairKey(m.sides[0].players[0], m.sides[1].players[0]));
   assert.equal(new Set(partners).size, 6);
   assert.equal(new Set(singles).size, 6);
 });
@@ -75,4 +76,25 @@ test('Pre Turkey Classic: the last nine is all four stroke play, 3-2-1-0 with ti
   const live = buildMatches(resolveConfig(turkey.DEFAULT_CONFIG, part)).find((m) => m.type === 'ninestroke');
   const pt = soloTable([live], part, ids);
   assert.equal(pt.reduce((a, x) => a + x.points, 0), 0);
+});
+
+test('Pre Turkey Classic: Saturday is 18-hole stroke play, 3-2-1-0; 12 points max for the trip', () => {
+  const ids = turkey.PLAYERS.map((p) => p.id);
+  // Tate 70, Garrett and Brody 72 (tied 2nd), Jonah 75.
+  const tw = { tate: { 3: -1, 12: -1 }, garrett: {}, brody: {}, jonah: { 1: 1, 2: 1, 18: 1 } };
+  const scores = { coral: Object.fromEntries(ids.map((p) => [p, card('coral', tw[p])])) };
+  const r = resolveConfig(turkey.DEFAULT_CONFIG, scores);
+  const sat = buildMatches(r).filter((m) => m.roundId === 'coral');
+  assert.equal(sat.length, 1);
+  assert.equal(sat[0].type, 'ninestroke');
+  assert.equal(sat[0].holes.length, 18);
+  const t = Object.fromEntries(soloTable(sat, scores, ids).map((x) => [x.id, x.points]));
+  assert.deepEqual(t, { tate: 3, garrett: 1.5, brody: 1.5, jonah: 0 });
+  // Not final until all 18 are in.
+  const nine = { coral: Object.fromEntries(ids.map((p) => [p, Object.fromEntries(Object.entries(scores.coral[p]).filter(([h]) => h <= 9))])) };
+  assert.equal(soloTable(sat, nine, ids).reduce((a, x) => a + x.points, 0), 0);
+  // A 12 gets strokes on the 4 hardest holes of each nine at Coral Canyon.
+  const withHcp = resolveConfig({ ...turkey.DEFAULT_CONFIG, hcp: { ...turkey.DEFAULT_HCP, jonah: 12 } }, scores);
+  const m = buildMatches(withHcp).find((x) => x.roundId === 'coral');
+  assert.deepEqual(m.strokes.jonah, [3, 4, 6, 9, 10, 13, 14, 18]);
 });

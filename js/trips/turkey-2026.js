@@ -1,5 +1,6 @@
-// The Pre Turkey Classic, Nov 22-23, 2026: two rounds near St. George with
-// the four of us, everyone for themselves. Every nine is a 2 v 2 best ball
+// The Pre Turkey Classic, Nov 21-23, 2026: three rounds around St. George
+// with the four of us, everyone for themselves. Saturday at Coral Canyon is an
+// 18-hole stroke play opener, 3-2-1-0 points. After that, every nine is a 2 v 2 best ball
 // plus two singles in the same foursome; each win is a point for the player.
 // Partners rotate so everyone partners everyone once and plays everyone once
 // in singles over the first three nines. The last nine is all four in one
@@ -16,10 +17,10 @@ export const SEEN_KEY = `golftrip:seen:${ID}`;
 export const TRIP = {
   name: 'Pre Turkey Classic',
   title: 'The Pre Turkey Classic',
-  dates: 'November 22 – 23, 2026',
+  dates: 'November 21 – 23, 2026',
   tagline: 'Mini Golf Getaway',
-  short: 'Hurricane, UT',
-  shortDates: 'Nov 22–23',
+  short: 'St. George, UT',
+  shortDates: 'Nov 21–23',
   year: 2026,
 };
 
@@ -33,6 +34,8 @@ export const PLAYERS = [
 // Partners and singles for each nine (see the top of the file).
 const nine = (a, b, singles) => ({ a, b, singles: singles.map(([x, y]) => ({ a: x, b: y })) });
 export const ROTATION = {
+  // Saturday: one 18-hole stroke play round, points by finish.
+  coral: [{ stroke: true, full: true, places: [3, 2, 1, 0] }],
   sky: [
     nine(['tate', 'garrett'], ['brody', 'jonah'], [['tate', 'brody'], ['garrett', 'jonah']]),
     nine(['tate', 'brody'], ['garrett', 'jonah'], [['tate', 'jonah'], ['brody', 'garrett']]),
@@ -45,6 +48,7 @@ export const ROTATION = {
 
 // Hole handicap (stroke index) from each scorecard: 1 = hardest hole.
 export const HOLE_HANDICAPS = {
+  coral: [9, 15, 5, 7, 13, 1, 17, 11, 3, 6, 10, 12, 8, 2, 16, 18, 14, 4],
   sky: [11, 17, 15, 3, 7, 9, 1, 13, 5, 10, 14, 12, 16, 2, 18, 8, 4, 6],
   copper: [14, 2, 16, 12, 8, 18, 4, 6, 10, 7, 9, 13, 1, 3, 17, 11, 15, 5],
 };
@@ -63,6 +67,10 @@ export const DEFAULT_CONFIG = {
   holeHcp: HOLE_HANDICAPS,
   rounds: [
     {
+      id: 'coral', tees: ['11:30 AM'], date: '2026-11-21', day: 'Sat Nov 21', course: 'Coral Canyon', enabled: true, format: 'nines', skins: 'all',
+      groups: [{ players: ['tate', 'garrett', 'brody', 'jonah'], nines: ROTATION.coral }],
+    },
+    {
       id: 'sky', tees: ['12:40 PM'], date: '2026-11-22', day: 'Sun Nov 22', course: 'Sky Mountain', enabled: true, format: 'nines', skins: 'all',
       groups: [{ players: ['tate', 'garrett', 'brody', 'jonah'], nines: ROTATION.sky }],
     },
@@ -72,6 +80,7 @@ export const DEFAULT_CONFIG = {
     },
   ],
   pars: {
+    coral: parsFrom([4, 3, 4, 3, 5, 4, 5, 3, 5, 4, 5, 3, 4, 4, 3, 5, 4, 4]), // Coral Canyon, 72
     sky: parsFrom([4, 3, 4, 4, 4, 5, 4, 3, 5, 5, 4, 3, 4, 4, 4, 3, 4, 5]), // Sky Mountain, 72
     copper: parsFrom([5, 4, 4, 3, 5, 4, 3, 4, 4, 4, 4, 5, 4, 4, 3, 5, 3, 4]), // Copper Rock (black), 72
   },
@@ -82,6 +91,12 @@ function parsFrom(list) {
 }
 
 export const ITINERARY = [
+  {
+    day: 'Saturday', date: 'Nov 21', title: 'Coral Canyon Golf Course',
+    items: [
+      { icon: '⛳', time: '11:30 AM', text: 'Tee time — Coral Canyon', sub: '18-hole stroke play opener · 3-2-1-0 points' },
+    ],
+  },
   {
     day: 'Sunday', date: 'Nov 22', title: 'Sky Mountain Golf Course',
     items: [

@@ -20,7 +20,7 @@ const ORGANIZER = 'tate';
 const PLAYER_IDS = PLAYERS.map((p) => p.id);
 const SKIN_STAKE = 5;
 // Shown at the bottom of the Trip tab, to check a phone has the latest version.
-const APP_VERSION = 'Nov 17 · Skins';
+const APP_VERSION = 'Nov 18 · Coral';
 const app = document.getElementById('app');
 
 let store;
@@ -564,7 +564,7 @@ function todayMatchCard(config, standings, round, me) {
   }).join('');
   const pts = mine.reduce((a, { match, result }) => a + (result.points?.[match.sides.findIndex((sd) => sd.players.includes(me))] || 0), 0);
   return `<div class="yours card"><div class="yours-kicker">${kicker}</div>
-    <div class="yours-title">You're done · ${fmtHalf(pts)} pt${pts === 1 ? '' : 's'}</div>${lines}</div>`;
+    <div class="yours-title">You're done · ${fmtHalf(pts)} pt${pts > 0 && pts <= 1 ? '' : 's'}</div>${lines}</div>`;
 }
 
 // ---------- Friday: Captain Round and the draft ----------
@@ -908,7 +908,7 @@ function nineStrokeCard(config, match, res) {
         <span class="ns-pos">${res.played ? `${tied ? 'T' : ''}${res.place[i]}` : ''}</span>
         <span class="ns-name">${esc(playerName(id))}${match.strokes?.[id] ? ' <small>●</small>' : ''}</span>
         <span class="ns-par">${mine.length ? fmtToPar(toPar) : '–'}<small>${mine.length && mine.length < match.holes.length ? ` thru ${mine.length}` : ''}</small></span>
-        <span class="ns-pts">${pts != null ? `${fmtHalf(pts)} pt${pts === 1 ? '' : 's'}` : ''}</span>
+        <span class="ns-pts">${pts != null ? `${fmtHalf(pts)} pt${pts > 0 && pts <= 1 ? '' : 's'}` : ''}</span>
       </div>`;
     }).join('')}
     <div class="ns-foot">${match.places.map((p, k) => `${ordinal(k + 1)} ${p}`).join(' · ')}${res.done ? '' : ' · live points if it ended now'}</div>
@@ -925,7 +925,7 @@ function soloPoints(config, scores) {
 
 // One player's matches on a nine, for the countdown: who they're with and who they play.
 function nineLine(nine, me, label) {
-  if (nine?.stroke) return `${label}: all four stroke play, ${nine.places.join('-')} points`;
+  if (nine?.stroke) return `${nine.full ? '18 holes' : label}: all four stroke play, ${nine.places.join('-')} points`;
   if (!nine?.singles) return label;
   if (!nine.a) {
     const s = nine.singles.find((x) => x.a === me || x.b === me);
@@ -983,7 +983,7 @@ function renderSoloBoard() {
       <div class="bc-top"><span>${esc(TRIP.name)} · ${esc(FORMAT_LABELS[round.format] || '')}</span>
         ${ms.some((m) => m.result.played > 0 && !m.result.done) ? '<span class="bc-live">LIVE</span>' : ''}</div>
       ${round.groups.map((g, gi) => (g.nines || []).map((n, ni) => `
-        <div class="bc-session"><span>${roundDay(round)} · ${esc(round.course)}</span><span>${ni ? 'Back' : 'Front'} 9</span></div>
+        <div class="bc-session"><span>${roundDay(round)} · ${esc(round.course)}</span><span>${n.full ? '18 holes' : `${ni ? 'Back' : 'Front'} 9`}</span></div>
         ${ms.filter((m) => m.match.group === gi && m.match.nine === ni).map((m) => broadcastCard(config, m.match, m.result)).join('')}`).join('')).join('')}
     </div>`;
   }
@@ -1005,7 +1005,7 @@ function renderSoloBoard() {
         <button class="info-btn ${ui.info === 'format' ? 'on' : ''}" data-action="info" data-id="format">Format ${ui.info === 'format' ? '▴' : '▾'}</button>
       </div>
       ${ui.info === 'format' ? `<div class="info-panel">
-        <p><b>Everyone for themselves.</b> Every nine, the foursome plays a 2 v 2 <b>best ball</b> and two <b>singles</b> matches at the same time.</p>
+        <p><b>Everyone for themselves.</b> ${rounds.some((r) => r.groups[0]?.nines?.[0]?.full) ? `<b>Saturday at ${esc(rounds.find((r) => r.groups[0]?.nines?.[0]?.full).course)}</b> is an 18-hole stroke play opener: 3 points for 1st, 2 for 2nd, 1 for 3rd (ties split). After that, every` : 'Every'} nine, the foursome plays a 2 v 2 <b>best ball</b> and two <b>singles</b> matches at the same time.</p>
         <ul>
           <li><b>Points:</b> win a match = 1 point, halve = ½. Best ball points go to both partners, so you can win up to 2 a nine.</li>
           <li><b>First three nines:</b> partners rotate so you play with everyone once and against everyone once in singles.</li>
@@ -1541,6 +1541,7 @@ function segmentLabel(round, hole) {
   const isFront = front.includes(hole);
   if (round.format === 'stroke') return ['Stroke play', SOLO ? 'Stroke play' : 'Captain Round'];
   if (round.format === 'teamstroke') return ['Team stroke', 'Team stroke play'];
+  if (round.format === 'nines' && round.groups[0]?.nines?.[0]?.full) return ['Stroke play', `${holesOf(round).length}-hole stroke play`];
   if (round.format === 'nines') return ['Best ball + singles', `${isFront ? 'Front' : 'Back'} 9 matches`];
   if (round.format === 'escalating') return isFront ? ['Singles · 1 pt', 'Front 9 singles'] : [`Singles · ${ESCALATING_BACK_POINTS} pt${ESCALATING_BACK_POINTS === 1 ? '' : 's'}`, 'Back 9 singles'];
   return isFront ? ['Best Ball', 'Best ball match'] : ['Singles', 'Singles matches'];
@@ -1963,7 +1964,7 @@ function renderSetup() {
       } else if (r.format === 'teamstroke') {
         detail = `<div class="singles-line">Team stroke play (net), ${TEAMSTROKE_POINTS} pts, plus ${BIRDIE_POINTS} for most birdies. Groups are Gamble Sands' groups.</div>`;
       } else if (r.format === 'nines') {
-        detail = resolved.groups.map((g) => g.nines.map((n, ni) => `<div class="singles-line">${ni ? 'Back' : 'Front'} 9: ${!n.singles
+        detail = resolved.groups.map((g) => g.nines.map((n, ni) => `<div class="singles-line">${n.full ? '18 holes' : `${ni ? 'Back' : 'Front'} 9`}: ${!n.singles
           ? (n.stroke ? `all four stroke play, <b>${n.places.join('-')}</b> points for 1st to 4th (ties split)` : '')
           : `${n.a ? `best ball <b>${n.a.map(name).join(' & ')}</b> v <b>${n.b.map(name).join(' & ')}</b> · ` : ''}${n.weight > 1 ? `championship singles (${n.weight} pts)` : 'singles'} <b>${n.singles.map((s) => `${name(s.a)} v ${name(s.b)}`).join(', ')}</b>`}</div>`).join('')).join('');
       } else if (r.format === 'stroke') {

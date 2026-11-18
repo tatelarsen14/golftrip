@@ -64,6 +64,13 @@ function matchStrokes(config, roundId, holes, players) {
   return out;
 }
 
+// Stroke holes from both nines together (an 18-hole stroke play round).
+function mergeStrokes(a, b) {
+  const out = { ...a };
+  for (const [p, hs] of Object.entries(b)) out[p] = [...(out[p] || []), ...hs];
+  return out;
+}
+
 // Quicksands has no stroke holes: each 12 takes TEAMSTROKE_STROKES off his
 // total, counted from the first tee so the live score is net all the way.
 function teamStrokeAllowance(config, players) {
@@ -113,13 +120,17 @@ export function buildMatches(config) {
         const nn = ni ? 'Back 9' : 'Front 9';
         const base = { roundId: round.id, group: gi, nine: ni, holes };
         if (nine?.stroke) {
-          // The whole foursome in one stroke play nine, points by finish.
+          // The whole foursome in one stroke play nine (or all 18 with
+          // `full`), points by finish.
           const players = [...g.players];
+          const all = nine.full ? holesOf(round) : holes;
+          const strokes = nine.full ? mergeStrokes(matchStrokes(config, round.id, front, players), matchStrokes(config, round.id, back, players))
+            : matchStrokes(config, round.id, holes, players);
           matches.push({
-            ...base, id: `${round.id}-g${gi + 1}-n${ni + 1}-stroke`, type: 'ninestroke',
-            label: `Stroke play · ${nn} · ${nine.places.join('-')}`, places: [...nine.places],
+            ...base, holes: all, id: `${round.id}-g${gi + 1}-n${ni + 1}-stroke`, type: 'ninestroke',
+            label: `Stroke play · ${nine.full ? `${all.length} holes` : nn} · ${nine.places.join('-')}`, places: [...nine.places],
             sides: players.map((p) => ({ team: -1, players: [p] })),
-            strokes: matchStrokes(config, round.id, holes, players),
+            strokes,
           });
           return;
         }

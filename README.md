@@ -94,14 +94,16 @@ first is the current trip and is what the plain link opens. Older trips open
 with `?trip=<id>` (the Trip tab lists them all under "All trips").
 
 - **Pre Turkey Classic** (`turkey-2026`, current): Tate, Garrett, Brody and
-  Jonah at Sky Mountain (Sun Nov 22) and Copper Rock (Mon Nov 23). `MODE:
+  Jonah at Coral Canyon (Sat Nov 21), Sky Mountain (Sun Nov 22) and Copper
+  Rock (Mon Nov 23). Saturday is an 18-hole stroke play opener, 3-2-1-0
+  points (ties split). `MODE:
   'solo'`: no teams, draft or Cup, everyone for themselves. Format `nines`:
   every nine is a 2 v 2 best ball plus two singles in the same foursome; a win
   is 1 point for the player (best ball: both partners), a halve ½, so 2 a nine
   and 8 in all. The first three nines rotate partners so everyone partners
   everyone once and plays everyone once in singles. The last nine (Copper Rock
   back) is all four in one stroke play nine: 3 points for 1st, 2 for 2nd, 1 for
-  3rd, none for 4th, ties split (9 max in all). Most points wins; ties go to
+  3rd, none for 4th, ties split (12 max in all, with Saturday). Most points wins; ties go to
   fewest strokes, then a putt-off. Skins on every hole ($5), the birdie board and a total strokes board too.
 - **Buckle Up** (`wa-id-2026`): the WA / ID trip, `MODE: 'cup'`, locked.
 
