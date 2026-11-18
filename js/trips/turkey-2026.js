@@ -1,6 +1,8 @@
 // The Pre Turkey Classic, Nov 21-23, 2026: three rounds around St. George
-// with the four of us, everyone for themselves. Saturday at Coral Canyon is an
-// 18-hole stroke play opener, 3-2-1-0 points. After that, every nine is a 2 v 2 best ball
+// with the four of us, everyone for themselves. Saturday at Coral Canyon is
+// Sixes: partners rotate every 6 holes and each stretch is a different 2 v 2
+// game (best ball, low / high ball, aggregate), 1 point to each partner who
+// wins it. Sunday and Monday, every nine is a 2 v 2 best ball
 // plus two singles in the same foursome; each win is a point for the player.
 // Partners rotate so everyone partners everyone once and plays everyone once
 // in singles over the first three nines. The last nine is all four in one
@@ -34,8 +36,12 @@ export const PLAYERS = [
 // Partners and singles for each nine (see the top of the file).
 const nine = (a, b, singles) => ({ a, b, singles: singles.map(([x, y]) => ({ a: x, b: y })) });
 export const ROTATION = {
-  // Saturday: one 18-hole stroke play round, points by finish.
-  coral: [{ stroke: true, full: true, places: [3, 2, 1, 0] }],
+  // Saturday: Sixes, a new partner and a new game every 6 holes.
+  coral: [
+    { from: 1, to: 6, game: 'bestball', a: ['tate', 'garrett'], b: ['brody', 'jonah'] },
+    { from: 7, to: 12, game: 'lowhigh', a: ['tate', 'brody'], b: ['garrett', 'jonah'] },
+    { from: 13, to: 18, game: 'aggregate', a: ['tate', 'jonah'], b: ['garrett', 'brody'] },
+  ],
   sky: [
     nine(['tate', 'garrett'], ['brody', 'jonah'], [['tate', 'brody'], ['garrett', 'jonah']]),
     nine(['tate', 'brody'], ['garrett', 'jonah'], [['tate', 'jonah'], ['brody', 'garrett']]),
@@ -94,7 +100,7 @@ export const ITINERARY = [
   {
     day: 'Saturday', date: 'Nov 21', title: 'Coral Canyon Golf Course',
     items: [
-      { icon: '⛳', time: '11:30 AM', text: 'Tee time — Coral Canyon', sub: '18-hole stroke play opener · 3-2-1-0 points' },
+      { icon: '⛳', time: '11:30 AM', text: 'Tee time — Coral Canyon', sub: 'Sixes · 1–6 best ball: Tate & Garrett v Brody & Jonah · 7–12 low/high ball: Tate & Brody v Garrett & Jonah · 13–18 aggregate: Tate & Jonah v Garrett & Brody' },
     ],
   },
   {

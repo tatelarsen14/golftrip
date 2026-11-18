@@ -58,7 +58,9 @@ export function hardestHoles(config, roundId, holes, n) {
 // above the lowest handicap in the match gets STROKES_PER_NINE on the nine.
 function matchStrokes(config, roundId, holes, players) {
   const low = Math.min(...players.map((p) => hcpOf(config, p)));
-  const where = hardestHoles(config, roundId, holes, STROKES_PER_NINE);
+  // A nine gets STROKES_PER_NINE; a shorter stretch (Sixes) gets its share.
+  const n = holes.length >= 9 ? STROKES_PER_NINE : Math.round((STROKES_PER_NINE * holes.length) / 9);
+  const where = hardestHoles(config, roundId, holes, n);
   const out = {};
   for (const p of players) if (hcpOf(config, p) > low && where.length) out[p] = where;
   return out;
@@ -116,9 +118,20 @@ export function buildMatches(config) {
     }
     if (round.format === 'nines') {
       round.groups.forEach((g, gi) => (g.nines || []).forEach((nine, ni) => {
-        const holes = [front, back][ni];
-        const nn = ni ? 'Back 9' : 'Front 9';
+        // A stretch with `from`/`to` (Sixes) covers those holes; otherwise a nine.
+        const holes = nine?.from ? holesOf(round).filter((h) => h >= nine.from && h <= nine.to) : [front, back][ni];
+        const nn = nine?.from ? `Holes ${nine.from}–${nine.to}` : ni ? 'Back 9' : 'Front 9';
         const base = { roundId: round.id, group: gi, nine: ni, holes };
+        if (nine?.game) {
+          // Sixes: one 2 v 2 match on the stretch, 1 point to each partner.
+          matches.push({
+            ...base, id: `${round.id}-g${gi + 1}-n${ni + 1}-${nine.game}`, type: 'bestball', game: nine.game,
+            label: `${GAME_LABELS[nine.game]} · ${nn}`,
+            sides: [{ team: 0, players: [...nine.a] }, { team: 1, players: [...nine.b] }],
+            strokes: matchStrokes(config, round.id, holes, [...nine.a, ...nine.b]),
+          });
+          return;
+        }
         if (nine?.stroke) {
           // The whole foursome in one stroke play nine (or all 18 with
           // `full`), points by finish.
@@ -180,6 +193,10 @@ export function buildMatches(config) {
   return matches;
 }
 
+// 2 v 2 games for a Sixes stretch: `bestball` (low ball), `lowhigh` (low ball
+// and high ball, a point each per hole), `aggregate` (both scores added).
+export const GAME_LABELS = { bestball: 'Best Ball', lowhigh: 'Low / High Ball', aggregate: 'Aggregate' };
+
 export function isScore(v) {
   return Number.isInteger(v) && v > 0;
 }
@@ -190,7 +207,20 @@ export function sideScore(roundScores, players, hole, match = null) {
   const vals = players
     .map((p) => netScore(match, p, hole, roundScores?.[p]?.[hole]))
     .filter(isScore);
-  return vals.length ? Math.min(...vals) : null;
+  if (!vals.length) return null;
+  // Aggregate: both partners' scores count.
+  return match?.game === 'aggregate' ? vals.reduce((a, b) => a + b, 0) : Math.min(...vals);
+}
+
+// Low ball / high ball: 2 points a hole, one for the better low ball and one
+// for the better high ball (a tie splits it). Returned as negative points so
+// the lower number wins the hole, like a score.
+function lowHigh(roundScores, match, hole) {
+  const nets = match.sides.map((s) => s.players.map((p) => netScore(match, p, hole, roundScores?.[p]?.[hole])));
+  const cmp = (x, y) => (x < y ? 1 : x === y ? 0.5 : 0);
+  const [a, b] = nets;
+  const pa = cmp(Math.min(...a), Math.min(...b)) + cmp(Math.max(...a), Math.max(...b));
+  return [-pa, -(2 - pa)];
 }
 
 // Team stroke play: every player's score counts, less each 12's allowance
@@ -313,8 +343,8 @@ export function computeMatch(match, roundScores) {
   const holes = [];
 
   for (const hole of match.holes) {
-    const a = sideScore(roundScores, match.sides[0].players, hole, match);
-    const b = sideScore(roundScores, match.sides[1].players, hole, match);
+    const [a, b] = match.game === 'lowhigh' ? lowHigh(roundScores, match, hole)
+      : [sideScore(roundScores, match.sides[0].players, hole, match), sideScore(roundScores, match.sides[1].players, hole, match)];
     // A hole only counts once everyone in the match has a score on it, so a
     // best ball hole can't be decided (or a match clinched) early.
     const allIn = match.sides.every((side) => side.players.every((p) => isScore(roundScores?.[p]?.[hole])));

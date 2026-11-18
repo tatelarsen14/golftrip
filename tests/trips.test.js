@@ -30,13 +30,13 @@ test('Pre Turkey Classic: every course is par 72', () => {
   for (const id of ['coral', 'sky', 'copper']) assert.equal(Object.values(t.DEFAULT_CONFIG.pars[id]).reduce((a, b) => a + b, 0), 72);
 });
 
-import { buildMatches, resolveConfig, computeStandings, soloTable } from '../js/scoring.js';
+import { buildMatches, resolveConfig, computeStandings, computeMatch, soloTable } from '../js/scoring.js';
 const turkey = TRIPS.find((x) => x.ID === 'turkey-2026');
 const pairKey = (x, y) => [x, y].sort().join('|');
 
 test('Pre Turkey Classic: first three nines, everyone partners everyone once and plays everyone once in singles', () => {
   const ms = buildMatches(resolveConfig(turkey.DEFAULT_CONFIG, {}));
-  assert.equal(ms.length, 11); // Saturday's stroke play, 3 a nine, plus the final stroke play nine
+  assert.equal(ms.length, 13); // Saturday's 3 Sixes matches, 3 a nine, plus the final stroke play nine
   const nines = ms.filter((m) => m.roundId !== 'coral');
   const partners = nines.filter((m) => m.type === 'bestball').flatMap((m) => m.sides.map((s) => pairKey(...s.players)));
   const singles = nines.filter((m) => m.type === 'singles').map((m) => pairKey(m.sides[0].players[0], m.sides[1].players[0]));
@@ -78,23 +78,35 @@ test('Pre Turkey Classic: the last nine is all four stroke play, 3-2-1-0 with ti
   assert.equal(pt.reduce((a, x) => a + x.points, 0), 0);
 });
 
-test('Pre Turkey Classic: Saturday is 18-hole stroke play, 3-2-1-0; 12 points max for the trip', () => {
+test('Pre Turkey Classic: Saturday is Sixes, a new partner and game every 6 holes', () => {
   const ids = turkey.PLAYERS.map((p) => p.id);
-  // Tate 70, Garrett and Brody 72 (tied 2nd), Jonah 75.
-  const tw = { tate: { 3: -1, 12: -1 }, garrett: {}, brody: {}, jonah: { 1: 1, 2: 1, 18: 1 } };
+  const sat = (scores) => buildMatches(resolveConfig(turkey.DEFAULT_CONFIG, scores)).filter((m) => m.roundId === 'coral');
+  const ms = sat({});
+  assert.deepEqual(ms.map((m) => [m.game, m.holes[0], m.holes[m.holes.length - 1]]),
+    [['bestball', 1, 6], ['lowhigh', 7, 12], ['aggregate', 13, 18]]);
+  // Everyone partners everyone once.
+  assert.equal(new Set(ms.flatMap((m) => m.sides.map((s) => pairKey(...s.players)))).size, 6);
+
+  // Tate & Garrett v Brody & Jonah, best ball 1-6: Tate birdies 1, all else par -> 1 UP.
+  // Tate & Brody v Garrett & Jonah, low / high 7-12: on 7 Tate birdies (low ball
+  // point) but Brody doubles (high ball point to the other side): a halved hole.
+  // On 8 Garrett and Jonah both bogey, Tate and Brody par: both points, hole won.
+  // Tate & Jonah v Garrett & Brody, aggregate 13-18: Garrett birdies 13 and
+  // Brody bogeys 14 -> they're +1 - 1 = even with Tate & Jonah's pars: halved.
+  const tw = { tate: { 1: -1, 7: -1 }, garrett: { 8: 1, 13: -1 }, brody: { 7: 2, 14: 1 }, jonah: { 8: 1 } };
   const scores = { coral: Object.fromEntries(ids.map((p) => [p, card('coral', tw[p])])) };
-  const r = resolveConfig(turkey.DEFAULT_CONFIG, scores);
-  const sat = buildMatches(r).filter((m) => m.roundId === 'coral');
-  assert.equal(sat.length, 1);
-  assert.equal(sat[0].type, 'ninestroke');
-  assert.equal(sat[0].holes.length, 18);
-  const t = Object.fromEntries(soloTable(sat, scores, ids).map((x) => [x.id, x.points]));
-  assert.deepEqual(t, { tate: 3, garrett: 1.5, brody: 1.5, jonah: 0 });
-  // Not final until all 18 are in.
-  const nine = { coral: Object.fromEntries(ids.map((p) => [p, Object.fromEntries(Object.entries(scores.coral[p]).filter(([h]) => h <= 9))])) };
-  assert.equal(soloTable(sat, nine, ids).reduce((a, x) => a + x.points, 0), 0);
-  // A 12 gets strokes on the 4 hardest holes of each nine at Coral Canyon.
-  const withHcp = resolveConfig({ ...turkey.DEFAULT_CONFIG, hcp: { ...turkey.DEFAULT_HCP, jonah: 12 } }, scores);
-  const m = buildMatches(withHcp).find((x) => x.roundId === 'coral');
-  assert.deepEqual(m.strokes.jonah, [3, 4, 6, 9, 10, 13, 14, 18]);
+  const res = sat(scores).map((m) => computeMatch(m, scores.coral));
+  assert.equal(res[0].status, 'Won 1 UP');
+  assert.equal(res[0].leader, 0);
+  assert.equal(res[1].holes[0].winner, 'halve');
+  assert.equal(res[1].holes[1].winner, 0);
+  assert.equal(res[1].leader, 0);
+  assert.equal(res[2].status, 'Halved');
+  // Points: 1 to each partner who wins a stretch, ½ for a halve.
+  const pts = Object.fromEntries(soloTable(sat(scores), scores, ids).map((x) => [x.id, x.points]));
+  assert.deepEqual(pts, { tate: 2.5, garrett: 1.5, brody: 1.5, jonah: 0.5 });
+
+  // A 12 gets 3 strokes on a 6-hole stretch.
+  const withHcp = buildMatches(resolveConfig({ ...turkey.DEFAULT_CONFIG, hcp: { ...turkey.DEFAULT_HCP, jonah: 12 } }, {}));
+  assert.deepEqual(withHcp.find((m) => m.roundId === 'coral' && m.game === 'bestball').strokes.jonah, [3, 4, 6]);
 });
