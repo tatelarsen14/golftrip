@@ -20,7 +20,7 @@ const ORGANIZER = 'tate';
 const PLAYER_IDS = PLAYERS.map((p) => p.id);
 const SKIN_STAKE = 5;
 // Shown at the bottom of the Trip tab, to check a phone has the latest version.
-const APP_VERSION = 'Nov 18 · Sixes';
+const APP_VERSION = 'Nov 19 · Tiebreak';
 const app = document.getElementById('app');
 
 let store;
@@ -926,6 +926,17 @@ function nineStrokeCard(config, match, res) {
 // How the trip's skins work, for the Format panels.
 const skinsWhere = (rounds) => (rounds.some((r) => r.skins === 'all') ? 'every hole' : 'par 3s');
 
+// Only at the end, and only when the top spot is tied on points: total
+// strokes over the trip decide it (then a putt-off).
+function tiebreakCard(tied, champ) {
+  return `<div class="card tiebreak">
+    <div class="tb-head">⚖️ Tiebreaker · total strokes</div>
+    <p class="muted">Tied on ${fmtHalf(tied[0].points)} points, so the fewest total strokes over every round wins it.</p>
+    ${tied.map((r) => `<div class="kv ${champ === r ? 'tb-win' : ''}"><span>${esc(playerName(r.id))}${champ === r ? ' 🏆' : ''}</span><b>${r.strokes}</b></div>`).join('')}
+    ${champ ? '' : '<p class="tb-putt">Still tied: putt-off for the title.</p>'}
+  </div>`;
+}
+
 // Points table for a solo trip: points, then fewest strokes.
 function soloPoints(config, scores) {
   return soloTable(buildMatches(config), scores, PLAYER_IDS);
@@ -961,7 +972,10 @@ function renderSoloBoard() {
   const standings = computeStandings(config, scores);
   const table = soloTable(standings.matches.map((m) => m.match), scores, PLAYER_IDS);
   const final = tripFinal(config, scores);
-  const tiedTop = table[1] && table[1].points === table[0].points && table[1].strokes === table[0].strokes;
+  // Total strokes only break a tie on points for the win, once it's all over.
+  const tiedOnPoints = table.filter((r) => r.points === table[0].points);
+  const needsTiebreak = final && tiedOnPoints.length > 1;
+  const tiedTop = needsTiebreak && tiedOnPoints[1].strokes === tiedOnPoints[0].strokes;
   const champ = final && !tiedTop ? table[0] : null;
   const birdies = Object.values(birdieCounts(config, scores, PLAYER_IDS)).sort((a, b) => (
     b.birdies - a.birdies || playerName(a.id).localeCompare(playerName(b.id))));
@@ -969,12 +983,14 @@ function renderSoloBoard() {
   // Most a player can win: 2 a nine (best ball + singles), or the championship nine's singles.
   const total = rounds.reduce((a, r) => a + r.groups[0].nines.reduce((x, n) => x + (n.stroke ? n.places[0] : n.game ? 1 : 2), 0), 0);
   const rows = table.map((r, i) => {
-    const same = (x) => x.points === r.points && x.strokes === r.strokes;
-    const rank = table.findIndex(same) + 1;
-    const tied = table.filter(same).length > 1;
+    // Ranked on points alone; the strokes tiebreak only shows (below) if it decides the winner.
+    const same = (x) => x.points === r.points;
+    const decided = champ && needsTiebreak && same(champ);
+    const rank = decided ? table.indexOf(r) + 1 : table.findIndex(same) + 1;
+    const tied = !decided && table.filter(same).length > 1;
     const live = r.projected - r.points;
     const lead = started && (champ ? r === champ : r.points === table[0].points && r.points > 0);
-    const note = [r.played ? `${r.strokes} strokes` : '', live > 0 ? `+${fmtHalf(live)} live` : ''].filter(Boolean).join(' · ');
+    const note = live > 0 ? `+${fmtHalf(live)} live` : '';
     return `<div class="ms-row ${lead ? 'cap' : ''}">
       <span class="ms-pos">${started ? `${tied ? 'T' : ''}${rank}` : ''}</span>
       <span class="ms-name">${esc(playerName(r.id).toUpperCase())}${champ === r ? ' 🏆' : ''}${note ? `<small>${note}</small>` : ''}</span>
@@ -1012,8 +1028,9 @@ function renderSoloBoard() {
           <div class="ms-row ms-cols"><span class="ms-pos">Pos</span><span class="ms-name">Player</span><span class="ms-par">Pts</span><span class="ms-thru">W-L-H</span></div>
           ${rows}
         </div>
-        <p class="ms-sub">${champ ? 'Final.' : tiedTop && final ? 'Tied on points and strokes: settle it with a putt-off.' : started ? 'Live. Win = 1 point, halve = ½. Ties go to fewest strokes.' : 'Every nine: best ball and singles. Win = 1 point, halve = ½.'}</p>
+        <p class="ms-sub">${champ ? 'Final.' : tiedTop ? 'Tied on points and total strokes: settle it with a putt-off.' : started ? 'Live. Win = 1 point, halve = ½.' : 'Win a match = 1 point, halve = ½.'}</p>
       </div>
+      ${needsTiebreak ? tiebreakCard(tiedOnPoints, champ) : ''}
       <div class="info-toggles">
         <button class="info-btn ${ui.info === 'format' ? 'on' : ''}" data-action="info" data-id="format">Format ${ui.info === 'format' ? '▴' : '▾'}</button>
       </div>
@@ -1039,10 +1056,6 @@ function renderSoloBoard() {
       <h2>Matches</h2>
       ${roundChips(round?.id)}
       ${matchesHtml}
-    </section>
-    <section>
-      <h2>Total strokes</h2>
-      ${soloBoard(config, rounds, null)}
     </section>
     <section>
       <h2>Skins 💰</h2>

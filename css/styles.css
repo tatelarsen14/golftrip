@@ -1108,3 +1108,11 @@ label.btn.disabled { opacity: .4; }
 .ns-par small { display: block; font: 600 10px Inter, sans-serif; color: var(--bc-dim); }
 .ns-pts { font: 700 13px Inter, sans-serif; text-align: right; color: #f4efe3; }
 .ns-foot { padding: 8px 10px 0; font-size: 12px; color: var(--bc-dim); }
+
+/* Solo trip tiebreaker: only shows at the end when points are tied for 1st. */
+.tiebreak { margin-top: 12px; border: 2px solid #d9ad4a; }
+.tb-head { font: 700 15px Oswald, sans-serif; letter-spacing: .06em; text-transform: uppercase; color: var(--forest); }
+.tiebreak .muted { margin: 4px 0 6px; font-size: 13px; }
+.tiebreak .kv b { font: 700 18px Oswald, sans-serif; }
+.tb-win { color: var(--forest); font-weight: 700; }
+.tb-putt { margin-top: 8px; font-weight: 700; color: #b3261e; }
