@@ -20,7 +20,7 @@ const ORGANIZER = 'tate';
 const PLAYER_IDS = PLAYERS.map((p) => p.id);
 const SKIN_STAKE = 5;
 // Shown at the bottom of the Trip tab, to check a phone has the latest version.
-const APP_VERSION = 'Nov 19 · Tiebreak';
+const APP_VERSION = 'Nov 20 · Skins';
 const app = document.getElementById('app');
 
 let store;
@@ -736,13 +736,23 @@ function tuePicksCard(config, round) {
 
 const courseOf = (config, roundId) => config.rounds.find((r) => r.id === roundId)?.course || '';
 
+// Which holes are skins this trip, in words: every hole, every par 3, or a mix.
+function skinsScope(config) {
+  const rs = enabledRounds(config).filter((r) => r.skins);
+  if (rs.every((r) => r.skins === 'all')) return `every hole${rs.length > 1 ? ` of all ${rs.length} rounds` : ''}`;
+  if (rs.every((r) => r.skins === 'par3')) return 'every par 3';
+  return `every par 3, plus every hole at ${rs.filter((r) => r.skins === 'all').map((r) => esc(r.course)).join(' & ')}`;
+}
+
 function skinsCard(config) {
   const { holes, net } = computeSkins(config, store.scores, PLAYER_IDS, SKIN_STAKE);
   const won = holes.filter((h) => h.winner);
   const decided = holes.filter((h) => !h.waiting.length);
   if (!decided.length) {
-    return `<div class="card sk-empty">💰 <b>${holes.length} skins</b> up for grabs: every par 3 at the main courses plus all 14 at Quicksands.
-      The outright low score wins $${SKIN_STAKE} from each of the other ${PLAYER_IDS.length - 1}. Any tie, no skin.</div>`;
+    const others = PLAYER_IDS.length - 1;
+    return `<div class="card sk-empty">💰 <b>${holes.length} skins</b> up for grabs: ${skinsScope(config)}.
+      Low score on a hole wins it outright and the other ${others} each pay you $${SKIN_STAKE} ($${SKIN_STAKE * others} a skin).
+      Any tie, nobody wins it and nothing carries over. Gross scores.</div>`;
   }
   const count = {};
   won.forEach((h) => { count[h.winner] = (count[h.winner] || 0) + 1; });
@@ -757,8 +767,8 @@ function skinsCard(config) {
   const pays = settleUp(net);
   return `<div class="card sk-card">
     <div class="sk-sum">${won.length} won · ${decided.length - won.length} tied · ${holes.length - decided.length} to play</div>
-    <p class="sk-how">Win a skin and everyone else pays you $${SKIN_STAKE} ($${pot} a skin). You pay $${SKIN_STAKE} on every skin someone else wins.
-      The number on the right is where you stand overall.</p>
+    <p class="sk-how">Skins on ${skinsScope(config)}. Win a hole outright and everyone else pays you $${SKIN_STAKE} ($${pot} a skin);
+      a tie means nobody wins it. You pay $${SKIN_STAKE} on every skin someone else wins. The number on the right is where you stand overall.</p>
     ${rows.map((r) => {
       const paid = r.n * pot - r.v;
       return `<div class="sk-row">
