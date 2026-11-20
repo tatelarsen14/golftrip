@@ -1116,3 +1116,7 @@ label.btn.disabled { opacity: .4; }
 .tiebreak .kv b { font: 700 18px Oswald, sans-serif; }
 .tb-win { color: var(--forest); font-weight: 700; }
 .tb-putt { margin-top: 8px; font-weight: 700; color: #b3261e; }
+
+/* Prize money lines on the Money card. */
+.sk-prizes { margin: 8px 0 4px; padding: 6px 10px; background: #f7f3e8; border-radius: 10px; }
+.sk-prizes .kv small { font-weight: 600; color: var(--muted); }

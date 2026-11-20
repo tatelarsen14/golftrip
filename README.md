@@ -107,7 +107,9 @@ with `?trip=<id>` (the Trip tab lists them all under "All trips").
   back) is all four in one stroke play nine: 3 points for 1st, 2 for 2nd, 1 for
   3rd, none for 4th, ties split (12 max in all, with Saturday's 3). Most points wins; ties go to
   fewest strokes (shown only at the end, only if it decides the winner), then a
-  putt-off. Skins on every hole ($5) and the birdie board.
+  putt-off. Skins on every hole ($5) and the birdie board. Prize money (PRIZES):
+  $60 to the overall winner, $30 to the birdie board winner, paid by the
+  rest equally (ties split), added to the settle-up once the trip is final.
 - **Buckle Up** (`wa-id-2026`): the WA / ID trip, `MODE: 'cup'`, locked.
 
 To add a trip: copy a trip file, give it a new `ID`, and put it first in

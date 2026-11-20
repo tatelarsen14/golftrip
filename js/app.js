@@ -2,7 +2,7 @@ import { createStore, withDefaults, MAX_VIDEO_MB } from './store.js';
 import { tripSummary, allTime, headToHead as careerH2H } from './history.js';
 import {
   PLAYERS, TEAM_COLORS, TRIP, ITINERARY, FLIGHTS, HOLE_HANDICAPS, TRIPS, CURRENT_TRIP, ACTIVE_TRIP, IS_CURRENT_TRIP,
-  TRIP_MODE, TRIP_FEED, UI_KEY, SEEN_KEY, tripHref,
+  TRIP_MODE, TRIP_FEED, TRIP_PRIZES, UI_KEY, SEEN_KEY, tripHref,
 } from './data.js';
 import {
   buildMatches, computeMatch, computeStandings, birdieCounts, parFor, scoreMark, rankTeams, resolveConfig,
@@ -20,7 +20,7 @@ const ORGANIZER = 'tate';
 const PLAYER_IDS = PLAYERS.map((p) => p.id);
 const SKIN_STAKE = 5;
 // Shown at the bottom of the Trip tab, to check a phone has the latest version.
-const APP_VERSION = 'Nov 20 · Skins';
+const APP_VERSION = 'Nov 20 · Prizes';
 const app = document.getElementById('app');
 
 let store;
@@ -75,7 +75,8 @@ const fmtQuarter = (n) => {
 };
 const fmtPts = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, ''));
 const fmtToPar = (n) => (n === 0 ? 'E' : n > 0 ? `+${n}` : String(n));
-const fmtMoney = (n) => (n === 0 ? '$0' : n > 0 ? `+$${n}` : `−$${-n}`);
+const dollars = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
+const fmtMoney = (n) => (n === 0 ? '$0' : n > 0 ? `+$${dollars(n)}` : `−$${dollars(-n)}`);
 const sideLabel = (side) => (side.players.length > 2 ? teamName(view, side.team) : side.players.map(playerName).join(' & '));
 const dayName = (r) => esc(r.day.split(' ')[0]);
 const todayStr = () => new Date().toLocaleDateString('en-CA');
@@ -744,20 +745,65 @@ function skinsScope(config) {
   return `every par 3, plus every hole at ${rs.filter((r) => r.skins === 'all').map((r) => esc(r.course)).join(' & ')}`;
 }
 
+// Prize money on top of skins (trips with PRIZES): the overall winner and
+// the birdie board winner. Everyone who didn't win chips in equally; tied
+// winners split it. It's paid (added to the settle-up) once the trip is final;
+// before that it shows who'd get it if it ended now.
+function prizeMoney(config) {
+  if (!TRIP_PRIZES) return null;
+  const { scores } = store;
+  const final = tripFinal(config, scores);
+  const table = soloTable(buildMatches(config), scores, PLAYER_IDS);
+  const started = table.some((r) => r.played);
+  // Overall: most points; at the end, total strokes break a tie (a tie on
+  // both splits it, unless the putt-off is settled between you).
+  let top = table.filter((r) => r.points === table[0].points);
+  if (final && top.length > 1) {
+    const best = Math.min(...top.map((r) => r.strokes));
+    top = top.filter((r) => r.strokes === best);
+  }
+  const b = birdieCounts(config, scores, PLAYER_IDS);
+  const most = Math.max(0, ...PLAYER_IDS.map((p) => b[p].birdies));
+  const prizes = [
+    { icon: '🏆', label: 'Overall winner', amount: TRIP_PRIZES.overall, winners: started ? top.map((r) => r.id) : [] },
+    { icon: '🐦', label: 'Birdie board', amount: TRIP_PRIZES.birdies, winners: most ? PLAYER_IDS.filter((p) => b[p].birdies === most) : [],
+      note: most ? `${most} birdie${most === 1 ? '' : 's'}` : '' },
+  ].filter((pz) => pz.amount);
+  const net = Object.fromEntries(PLAYER_IDS.map((p) => [p, 0]));
+  for (const pz of prizes) {
+    const payers = PLAYER_IDS.filter((p) => !pz.winners.includes(p));
+    if (!pz.winners.length || !payers.length) { pz.winners = pz.winners.length === PLAYER_IDS.length ? [] : pz.winners; continue; }
+    if (!final) continue;
+    pz.winners.forEach((p) => { net[p] += pz.amount / pz.winners.length; });
+    payers.forEach((p) => { net[p] -= pz.amount / payers.length; });
+  }
+  const html = `<div class="sk-prizes">${prizes.map((pz) => {
+    const who = pz.winners.map((p) => esc(playerName(p))).join(' & ');
+    const split = pz.winners.length > 1 ? ` · $${dollars(pz.amount / pz.winners.length)} each` : '';
+    return `<div class="kv"><span>${pz.icon} ${pz.label} · <b>$${pz.amount}</b></span>
+      <b>${who ? `${who}${split}${pz.note ? ` <small>(${pz.note})</small>` : ''}${final ? '' : ' <small>if it ended now</small>'}` : '<span class="muted">TBD</span>'}</b></div>`;
+  }).join('')}</div>`;
+  return { final, prizes, net, html };
+}
+
+const PRIZE_HOW = () => (TRIP_PRIZES ? ` Plus prize money at the end: $${TRIP_PRIZES.overall} to the overall winner and $${TRIP_PRIZES.birdies} to the birdie board winner. Everyone else chips in equally; ties split it.` : '');
+
 function skinsCard(config) {
-  const { holes, net } = computeSkins(config, store.scores, PLAYER_IDS, SKIN_STAKE);
+  const { holes, net: skinNet } = computeSkins(config, store.scores, PLAYER_IDS, SKIN_STAKE);
+  const pm = prizeMoney(config);
+  const net = Object.fromEntries(PLAYER_IDS.map((p) => [p, skinNet[p] + (pm?.net[p] || 0)]));
   const won = holes.filter((h) => h.winner);
   const decided = holes.filter((h) => !h.waiting.length);
   if (!decided.length) {
     const others = PLAYER_IDS.length - 1;
     return `<div class="card sk-empty">💰 <b>${holes.length} skins</b> up for grabs: ${skinsScope(config)}.
       Low score on a hole wins it outright and the other ${others} each pay you $${SKIN_STAKE} ($${SKIN_STAKE * others} a skin).
-      Any tie, nobody wins it and nothing carries over. Gross scores.</div>`;
+      Any tie, nobody wins it and nothing carries over. Gross scores.${PRIZE_HOW()}</div>${pm ? `<div class="card sk-card">${pm.html}</div>` : ''}`;
   }
   const count = {};
   won.forEach((h) => { count[h.winner] = (count[h.winner] || 0) + 1; });
   const pot = SKIN_STAKE * (PLAYER_IDS.length - 1);
-  const rows = PLAYER_IDS.map((p) => ({ p, v: net[p], n: count[p] || 0 }))
+  const rows = PLAYER_IDS.map((p) => ({ p, v: net[p], skins: skinNet[p], prize: pm?.net[p] || 0, n: count[p] || 0 }))
     .sort((a, b) => b.v - a.v || playerName(a.p).localeCompare(playerName(b.p)));
   const recent = [...won].reverse().map((h) => `<div class="sk-hole">
       <span>${esc(courseOf(config, h.roundId))} #${h.hole}</span>
@@ -768,18 +814,19 @@ function skinsCard(config) {
   return `<div class="card sk-card">
     <div class="sk-sum">${won.length} won · ${decided.length - won.length} tied · ${holes.length - decided.length} to play</div>
     <p class="sk-how">Skins on ${skinsScope(config)}. Win a hole outright and everyone else pays you $${SKIN_STAKE} ($${pot} a skin);
-      a tie means nobody wins it. You pay $${SKIN_STAKE} on every skin someone else wins. The number on the right is where you stand overall.</p>
+      a tie means nobody wins it. You pay $${SKIN_STAKE} on every skin someone else wins. The number on the right is where you stand overall.${PRIZE_HOW()}</p>
+    ${pm ? pm.html : ''}
     ${rows.map((r) => {
-      const paid = r.n * pot - r.v;
+      const paid = r.n * pot - r.skins;
       return `<div class="sk-row">
       <span class="sk-name">${teamDot(teamOf(config, r.p))}${esc(playerName(r.p))}</span>
-      <span class="sk-n">${r.n ? `${r.n} skin${r.n === 1 ? '' : 's'} · won $${r.n * pot}` : ''}${paid ? `${r.n ? ' · ' : ''}paid $${paid}` : ''}</span>
+      <span class="sk-n">${[r.n ? `${r.n} skin${r.n === 1 ? '' : 's'} · won $${r.n * pot}` : '', paid ? `paid $${paid}` : '', r.prize ? `prizes ${fmtMoney(r.prize)}` : ''].filter(Boolean).join(' · ')}</span>
       <b class="sk-v ${r.v > 0 ? 'up' : r.v < 0 ? 'down' : ''}">${fmtMoney(r.v)}</b>
     </div>`;
     }).join('')}
     ${recent ? `<div class="sk-recent">${recent}</div>` : ''}
     <button class="info-btn ${open ? 'on' : ''}" data-action="info" data-id="settle">Settle up ${open ? '▴' : '▾'}</button>
-    ${open ? `<div class="sk-settle"><p class="sk-how">Everything combined into the fewest payments, so nobody has to send eight $5 Venmos.</p>${pays.length ? pays.map((x) => `<div class="kv"><span>${esc(playerName(x.from))} → ${esc(playerName(x.to))}</span><b>$${x.amount}</b></div>`).join('')
+    ${open ? `<div class="sk-settle"><p class="sk-how">Everything combined into the fewest payments, so nobody has to send eight $5 Venmos.${pm && !pm.final ? ' Prize money gets added once the trip is final.' : ''}</p>${pays.length ? pays.map((x) => `<div class="kv"><span>${esc(playerName(x.from))} → ${esc(playerName(x.to))}</span><b>$${dollars(x.amount)}</b></div>`).join('')
       : '<p class="muted">Everyone is even.</p>'}</div>` : ''}
   </div>`;
 }
@@ -789,7 +836,7 @@ function skinsCard(config) {
 function birdieBoard(config, birdies) {
   const withBirdies = birdies.filter((b) => b.birdies > 0);
   if (!withBirdies.length) {
-    return '<div class="card bb-empty">No birdies yet. The first one gets a shoutout in the Feed 🐦</div>';
+    return `<div class="card bb-empty">No birdies yet.${TRIP_FEED ? ' The first one gets a shoutout in the Feed 🐦' : ''}${TRIP_PRIZES ? ` Most birdies wins $${TRIP_PRIZES.birdies}.` : ''}</div>`;
   }
   const rankOf = (b) => 1 + birdies.filter((o) => o.birdies > b.birdies).length;
   const medal = (r) => ['🥇', '🥈', '🥉'][r - 1] || '';
@@ -1059,6 +1106,7 @@ function renderSoloBoard() {
           <li><b>Final nine (Copper Rock back):</b> all four play it as stroke play. 3 points for 1st, 2 for 2nd, 1 for 3rd, none for 4th. Tied: split the points for those places (tied for 1st = 2½ each). ${total} points max in all.</li>
           <li><b>Winner:</b> most points. Tied: fewest total strokes, then a putt-off.</li>
           <li><b>Skins:</b> ${skinsWhere(rounds)}, $${SKIN_STAKE} a player. Win a hole outright and everyone else pays you; a tie means no skin.</li>
+          ${TRIP_PRIZES ? `<li><b>Prize money:</b> $${TRIP_PRIZES.overall} to the overall winner, $${TRIP_PRIZES.birdies} to the birdie board winner. Everyone else chips in equally; ties split it.</li>` : ''}
         </ul>
       </div>` : ''}
     </section>
@@ -1068,7 +1116,7 @@ function renderSoloBoard() {
       ${matchesHtml}
     </section>
     <section>
-      <h2>Skins 💰</h2>
+      <h2>${TRIP_PRIZES ? 'Money' : 'Skins'} 💰</h2>
       ${skinsCard(config)}
     </section>
     <section>
