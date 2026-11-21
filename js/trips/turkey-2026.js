@@ -11,8 +11,6 @@
 export const ID = 'turkey-2026';
 export const LOCKED = false;
 export const MODE = 'solo';
-// Small group: no Feed tab this trip.
-export const FEED = false;
 // Prize money on top of skins: the overall winner and the birdie board winner.
 export const PRIZES = { overall: 60, birdies: 30 };
 export const UI_KEY = `golftrip:ui:${ID}`;

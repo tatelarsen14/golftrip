@@ -20,7 +20,7 @@ const ORGANIZER = 'tate';
 const PLAYER_IDS = PLAYERS.map((p) => p.id);
 const SKIN_STAKE = 5;
 // Shown at the bottom of the Trip tab, to check a phone has the latest version.
-const APP_VERSION = 'Nov 20 · Prizes';
+const APP_VERSION = 'Nov 21 · Feed';
 const app = document.getElementById('app');
 
 let store;
